@@ -4,10 +4,8 @@ import path from 'node:path';
 import { db } from './db.ts';
 import { encrypt, decrypt } from './crypto.ts';
 import { N8nClient, normalizeBaseUrl } from './n8n.ts';
-import {
-  announceSetupCode, checkPassword, consumeSetupCode, createSession, destroyAllSessions, destroySession, isAuthenticated, isSetUp,
-  loginFailed, loginSucceeded, loginThrottle, requireAuth, setPassword,
-} from './auth.ts';
+import { announceSetupCode, requireAuth } from './auth.ts';
+import { createAuthRouter } from './auth-router.ts';
 import {
   clientFor, getInstance, isSyncing, loadSnapshot, recordWorkflow, restoreVersion, startScheduler, syncInstance, type InstanceRow,
 } from './sync.ts';
@@ -123,58 +121,8 @@ function clientIp(req: Request) {
   return req.ip ?? 'unknown';
 }
 
-app.get('/api/auth/status', (req, res) => {
-  res.json({ setup: isSetUp(), authenticated: isAuthenticated(req), envPassword: !!process.env.ADMIN_PASSWORD });
-});
-
-app.post('/api/auth/setup', async (req, res) => {
-  if (isSetUp()) throw new HttpError(409, 'Bereits eingerichtet');
-  const ip = clientIp(req);
-  const wait = loginThrottle(ip);
-  if (wait) throw new HttpError(429, `Zu viele Versuche – bitte ${wait}s warten`);
-  const pw = String(req.body?.password ?? '');
-  if (pw.length < 8) throw new HttpError(400, 'Passwort muss mindestens 8 Zeichen haben');
-  if (!consumeSetupCode(String(req.body?.code ?? ''))) {
-    loginFailed(ip);
-    throw new HttpError(403, 'Einrichtungscode falsch – er steht im Server-Log');
-  }
-  loginSucceeded(ip);
-  await setPassword(pw);
-  createSession(req, res);
-  res.json({ ok: true });
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  const ip = clientIp(req);
-  const wait = loginThrottle(ip);
-  if (wait) throw new HttpError(429, `Zu viele Versuche – bitte ${wait}s warten`);
-  if (!(await checkPassword(String(req.body?.password ?? '')))) {
-    loginFailed(ip);
-    throw new HttpError(401, 'Falsches Passwort');
-  }
-  loginSucceeded(ip);
-  createSession(req, res);
-  res.json({ ok: true });
-});
-
-app.post('/api/auth/logout', (req, res) => {
-  destroySession(req, res);
-  res.json({ ok: true });
-});
-
+app.use('/api/auth', createAuthRouter(clientIp));
 app.use('/api', requireAuth);
-
-app.post('/api/auth/password', async (req, res) => {
-  if (process.env.ADMIN_PASSWORD) throw new HttpError(400, 'Passwort wird über ADMIN_PASSWORD gesetzt');
-  if (!(await checkPassword(String(req.body?.current ?? '')))) throw new HttpError(401, 'Aktuelles Passwort ist falsch');
-  const next = String(req.body?.next ?? '');
-  if (next.length < 8) throw new HttpError(400, 'Neues Passwort muss mindestens 8 Zeichen haben');
-  await setPassword(next);
-  // Alle anderen Geräte abmelden, dieses bleibt angemeldet
-  destroyAllSessions();
-  createSession(req, res);
-  res.json({ ok: true });
-});
 
 // ───────────────────────── Instanzen ─────────────────────────
 

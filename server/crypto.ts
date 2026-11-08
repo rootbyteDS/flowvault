@@ -5,10 +5,10 @@ import zlib from 'node:zlib';
 import { DATA_DIR } from './db.ts';
 
 /**
- * Schlüssel für die Verschlüsselung der n8n-API-Keys.
+ * Schlüssel für die Verschlüsselung der n8n-API-Keys und des TOTP-Geheimnisses.
  * Entweder über APP_SECRET (empfohlen in Produktion) oder automatisch
  * erzeugt in data/secret.key. Geht dieser Schlüssel verloren, müssen die
- * API-Keys der Instanzen neu eingetragen werden.
+ * API-Keys der Instanzen neu eingetragen und 2FA über Wiederherstellungscodes neu eingerichtet werden.
  */
 function loadKey(): Buffer {
   if (process.env.APP_SECRET) {

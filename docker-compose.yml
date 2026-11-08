@@ -10,9 +10,10 @@ services:
     environment:
       # Langer, zufälliger Wert – verschlüsselt die n8n-API-Keys. NICHT verlieren!
       APP_SECRET: ${APP_SECRET:?Bitte APP_SECRET in .env setzen}
-      # Optional: festes Admin-Passwort. Sonst beim ersten Aufruf festlegen – mit dem
+      # Optional: feste Admin-Zugangsdaten. Sonst beim ersten Aufruf festlegen – mit dem
       # Einrichtungscode aus `docker logs flowvault`.
       # ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      # ADMIN_EMAIL: ${ADMIN_EMAIL}
       # Hinter einem Reverse Proxy (Caddy, Traefik, nginx) unbedingt setzen – sonst teilen sich
       # alle Nutzer die IP des Proxys und die Login-Sperre trifft alle gleichzeitig:
       # TRUST_PROXY: "1"

@@ -2,7 +2,7 @@
 
 Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workflows, legt bei jeder Änderung eine neue Version an und zeigt dir visuell, was sich geändert hat.
 
-**Stand: 0.1.0, frühe Entwicklung.** FlowVault wird selbst gehostet und verwendet ein gemeinsames Admin-Passwort; getrennte Benutzerkonten und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
+**Stand: 0.1.0, frühe Entwicklung.** FlowVault wird selbst gehostet und verwendet ein einzelnes Admin-Konto mit E-Mail und Passwort sowie optionaler Zwei-Faktor-Authentifizierung (TOTP). Mehrere Benutzer und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
 
 [Schnellstart](#schnellstart-lokal) · [Docker](#betrieb-mit-docker) · [Entwicklung](#entwicklung) · [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md)
 
@@ -19,7 +19,7 @@ Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workfl
 - **Welche Änderung hat es kaputt gemacht?** FlowVault holt die Ausführungen aus n8n und legt sie über die Versionshistorie: Fehlerquote pro Version („seit v14 schlagen 38 % fehl, vorher 0 %“), im Diff-Canvas rot markiert, welcher Node seit der Änderung scheitert, und bei einem Anstieg eine Warnung mit Rollback-Vorschlag. Rollback per Klick. Läuft als eigener Prozess innerhalb von FlowVault, siehe [Health-Dienst](#health-dienst-fehlerquote-pro-version)
 - **Download** jeder Version als n8n-importierbares JSON
 - Aktivitäts-Feed und Heatmap, Sync-Protokoll pro Instanz
-- API-Keys AES-256-GCM-verschlüsselt, Login mit Passwort (siehe [Sicherheit](#sicherheit))
+- API-Keys AES-256-GCM-verschlüsselt, Login mit E-Mail und Passwort, optionale 2FA per Authenticator-App mit einmaligen Wiederherstellungscodes (siehe [Sicherheit](#sicherheit))
 - **KI-Änderungstexte (optional)** über [Melious](https://melious.ai): Zu jeder neuen Version schreibt ein Modell auf EU-Infrastruktur einen Titel im Commit-Stil plus Stichpunkte. Gesendet werden nur die geänderten Nodes und Parameter – nur wenn du für eine erste Version selbst einen Text anforderst, der ganze Workflow. Werte von Feldern wie `password`, `token`, `apiKey` oder `Authorization` sowie typische Key-Formate (Bearer, JWT, `sk_…`, `ghp_…`, AWS) entfernt FlowVault vorher. Das ist eine Heuristik: Zugangsdaten gehören in n8n-Credentials, nicht in Code-Nodes. Einrichtung unter **Einstellungen → KI-Änderungstexte**.
 
 Nur echte Änderungen erzeugen Versionen – Laufzeitdaten wie `staticData` (z. B. Polling-Zeitstempel) werden ignoriert.
@@ -36,7 +36,9 @@ npm run build
 npm start            # → http://127.0.0.1:4000
 ```
 
-Beim ersten Aufruf legst du ein Admin-Passwort fest und verbindest dann deine erste Instanz. Dafür brauchst du den **Einrichtungscode**, den der Server beim Start ins Terminal schreibt – so kann niemand anderes eine frisch gestartete Instanz übernehmen.
+Beim ersten Aufruf legst du die E-Mail und das Passwort für dein Admin-Konto fest und verbindest dann deine erste Instanz. Dafür brauchst du den **Einrichtungscode**, den der Server beim Start ins Terminal schreibt – so kann niemand anderes eine frisch gestartete Instanz übernehmen. Anschließend kannst du unter **Einstellungen → Zwei-Faktor-Authentifizierung** 2FA aktivieren.
+
+Bei bestehenden Installationen meldest du dich zunächst mit dem bisherigen Admin-Passwort an und hinterlegst anschließend einmalig die Admin-E-Mail. Bis dahin sind die übrigen Funktionen gesperrt. Das bisherige Passwort bleibt erhalten; die Umstellung meldet andere Geräte ab.
 
 ### n8n-API-Key besorgen
 
@@ -53,7 +55,7 @@ MOCK_ENV=Prod MOCK_PORT=5680 npm run mock-n8n   # zweite Fake-Instanz mit eigene
 curl -X POST localhost:5679/_mock/mutate   # simuliert eine Workflow-Änderung
 curl -X POST localhost:5679/_mock/break    # Änderung, nach der ein Node in 40 % der Läufe scheitert
 curl -X POST 'localhost:5679/_mock/run?n=30'  # sofort 30 Läufe pro aktivem Workflow
-npm test             # Tests der Umgebungs-Zuordnungen und der Health-Auswertung
+npm test             # Auth-/2FA-Tests, Umgebungs-Zuordnungen und Health-Auswertung
 # Der Mock spielt auch Melious: API-Adresse http://localhost:5679/v1, Key test-ai-key
 MOCK_LOG_PROMPT=1 npm run mock-n8n          # zeigt, was an die KI gesendet würde
 npm run typecheck
@@ -70,7 +72,7 @@ Trage den erzeugten Wert in `.env` hinter `APP_SECRET=` ein. Die Datei und den S
 
 ```bash
 docker compose up -d --build
-docker compose logs flowvault  # zeigt den Einrichtungscode für das Admin-Passwort
+docker compose logs flowvault  # zeigt den Einrichtungscode für das Admin-Konto
 ```
 
 Der Port ist nur auf `127.0.0.1` freigegeben. Von außen erreichbar machst du FlowVault über einen Reverse Proxy mit HTTPS (Caddy, Traefik, nginx) – dann **`TRUST_PROXY=1` setzen**, sonst zählen alle Login-Versuche für die IP des Proxys. Läuft FlowVault im selben Docker-Netzwerk wie n8n, kannst du als URL z. B. `http://n8n:5678` eintragen.
@@ -92,6 +94,7 @@ docker compose up -d
 | `DATA_DIR`       | `./data`     | Speicherort für Datenbank & Schlüssel |
 | `APP_SECRET`     | –            | Schlüssel für die API-Key-Verschlüsselung. Ohne: wird automatisch in `data/secret.key` erzeugt |
 | `ADMIN_PASSWORD` | –            | Festes Admin-Passwort statt Einrichtung im Browser |
+| `ADMIN_EMAIL`    | –            | Feste Admin-E-Mail; zusammen mit `ADMIN_PASSWORD` ohne Ersteinrichtung nutzbar. Ohne diese Variable wird die E-Mail im Browser hinterlegt |
 | `TRUST_PROXY`    | –            | `1` hinter einem Reverse Proxy (Pflicht, sonst greift die Login-Sperre für alle) |
 | `HEALTH_PORT`    | `4100`       | Interner Port des Health-Dienstes (nur `127.0.0.1`, nie nach außen) |
 
@@ -127,7 +130,11 @@ Alle Schwellenwerte stehen unter **Einstellungen → Fehlerquote pro Version**.
 Wer in FlowVault angemeldet ist, kann Workflows in alle verbundenen n8n-Instanzen schreiben. Deshalb:
 
 - **Einrichtung nur mit Code** aus dem Server-Log. Nach 5 falschen Versuchen (Login wie Einrichtung) sperrt FlowVault die IP mit wachsender Wartezeit.
-- **Sitzungen**: HttpOnly-Cookie mit `SameSite=Strict`, in der Datenbank nur als SHA-256 gespeichert. Ein Passwortwechsel meldet alle anderen Geräte ab.
+- **Admin-Konto**: Anmeldung mit E-Mail und Passwort. Die E-Mail wird als Anmeldename verwendet, nicht per Mail bestätigt. Mailversand und Passwort-Reset per E-Mail sind noch nicht implementiert. Über `ADMIN_EMAIL` bzw. `ADMIN_PASSWORD` konfigurierte Werte können nicht im Browser geändert werden; 2FA bleibt auch mit diesen Variablen erforderlich.
+- **2FA (optional)**: Unter **Einstellungen → Zwei-Faktor-Authentifizierung** mit dem aktuellen Passwort starten, QR-Code mit einer Authenticator-App scannen (oder Schlüssel manuell eingeben) und einen sechsstelligen App-Code bestätigen. Die Einrichtung ist zehn Minuten gültig und bis zur Bestätigung nicht aktiv. Das TOTP-Geheimnis wird mit AES-256-GCM verschlüsselt gespeichert. App-Codes gelten für 30 Sekunden, mit einem Zeitschritt Toleranz in beide Richtungen; akzeptierte Codes können nicht wiederverwendet werden. Server und Handy sollten eine synchronisierte Uhr haben.
+- **Wiederherstellungscodes**: Bei Aktivierung werden zehn zufällige Codes einmalig angezeigt und können als Textdatei heruntergeladen werden. Sicher getrennt vom Passwort aufbewahren. Ein Code ersetzt einmalig den App-Code, das Passwort bleibt nötig. Gespeichert werden nur SHA-256-Hashes. Neue Codes können mit Passwort und einem gültigen App- oder Wiederherstellungscode erstellt werden; damit werden alle alten Codes ungültig. Bei verlorenem Handy mit einem Wiederherstellungscode anmelden und mit einem weiteren Code 2FA deaktivieren, dann neu einrichten.
+- **Anmeldung mit 2FA**: Nach gültiger E-Mail und Passwort gibt es nur eine fünf Minuten gültige Anmeldeprüfung, noch keine Sitzung oder API-Zugriff. Nach fünf falschen Codes wird diese Prüfung auch bei wechselnder IP ungültig. QR-Einrichtungen sind an die angemeldete Sitzung gebunden und werden nach fünf falschen Codes verworfen.
+- **Sitzungen**: HttpOnly-Cookies mit `SameSite=Strict` (unter HTTPS zusätzlich `Secure`), Sitzungstokens und Anmeldeprüfungen in der Datenbank nur als SHA-256 gespeichert. Änderungen an E-Mail oder Passwort sowie Aktivieren/Deaktivieren von 2FA und Erneuern der Wiederherstellungscodes melden alle anderen Geräte ab und verwerfen ausstehende Anmeldungen. Solche Änderungen benötigen das aktuelle Passwort und bei aktiver 2FA zusätzlich einen frischen App- oder Wiederherstellungscode.
 - **CSRF**: Schreibende Requests nur von der eigenen Seite (`Sec-Fetch-Site`/`Origin`) und nur als JSON.
 - **API-Keys** verlassen FlowVault nur zur gespeicherten Adresse. Wird die URL einer Instanz oder der KI-API geändert, muss der Key neu eingegeben werden. Weiterleitungen werden nicht verfolgt, Cloud-Metadaten-Adressen (169.254.x.x) sind gesperrt.
 - **Header**: strikte Content-Security-Policy, kein Einbetten in fremde Seiten, HSTS hinter HTTPS-Proxy.
@@ -138,7 +145,7 @@ Gut zu wissen: Die Snapshots enthalten auch Pin-Data (Testdaten) und `staticData
 
 ## Backup von FlowVault selbst
 
-Sichere `flowvault.db` (SQLite, alle Versionen gzip-komprimiert) aus `DATA_DIR` und den verwendeten Schlüssel: entweder `secret.key` aus demselben Verzeichnis oder den Wert von `APP_SECRET` aus deiner Betriebskonfiguration. **Datenbank und Schlüssel zusammen sichern** – ohne Schlüssel müssen die API-Keys neu eingetragen werden, die Workflow-Versionen bleiben aber lesbar.
+Sichere `flowvault.db` (SQLite, alle Versionen gzip-komprimiert) aus `DATA_DIR` und den verwendeten Schlüssel: entweder `secret.key` aus demselben Verzeichnis oder den Wert von `APP_SECRET` aus deiner Betriebskonfiguration. **Datenbank und Schlüssel zusammen sichern** – ohne Schlüssel müssen die API-Keys neu eingetragen werden und aktive 2FA kann nur mit Wiederherstellungscodes zurückgesetzt werden; die Workflow-Versionen bleiben lesbar. Die Wiederherstellungscodes zusätzlich sicher aufbewahren.
 
 Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flowvault` bzw. den lokalen Server beenden). Im laufenden Betrieb keine isolierte Kopie von `flowvault.db` anlegen: SQLite verwendet zusätzlich WAL-Dateien. Danach FlowVault wieder starten.
 
@@ -149,6 +156,9 @@ Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flo
 ```
 server/          Node.js + Express (TypeScript, läuft nativ ohne Build)
   index.ts       REST-API & Auslieferung des Frontends
+  auth-router.ts Admin-Konto, E-Mail-Migration und 2FA-Endpunkte
+  auth.ts        Passwortprüfung, Sitzungen und Login-Sperre
+  two-factor.ts  TOTP-Prüfung, Replay-Schutz und Wiederherstellungscodes
   sync.ts        Sync-Engine, Scheduler, Wiederherstellen
   n8n.ts         Client für die n8n Public API
   internal.ts    Interne API für Dienste (Token) + Weiterleitung /api/health → Health-Dienst

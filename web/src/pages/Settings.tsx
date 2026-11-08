@@ -3,6 +3,7 @@ import { useLocation } from 'react-router';
 import { CircleCheck, CircleX } from 'lucide-react';
 import { api, useApi, type AiSettings, type HealthSettings, type HealthStatus } from '../api.ts';
 import { Button, Card, ErrorBox, Field, InfoTip, PageHeader, Status, Switch, inputCls, useToast } from '../components/ui.tsx';
+import { AdminSettings } from '../components/AdminSettings.tsx';
 import { HowItWorks, explainPollError } from '../components/health.tsx';
 import { cx, timeAgo } from '../util.ts';
 
@@ -340,48 +341,13 @@ function AiCard() {
 }
 
 export function SettingsPage() {
-  const toast = useToast();
-  const status = useApi<{ envPassword: boolean }>('/auth/status');
-  const [cur, setCur] = useState('');
-  const [next, setNext] = useState('');
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
-
-  async function change(e: React.FormEvent) {
-    e.preventDefault();
-    setError(undefined);
-    setBusy(true);
-    try {
-      await api('/auth/password', { body: { current: cur, next } });
-      toast('Passwort geändert');
-      setCur('');
-      setNext('');
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <>
       <PageHeader title="Einstellungen" />
       <div className="grid max-w-5xl gap-6 md:grid-cols-2">
         <HealthCard />
         <AiCard />
-        <Card className="p-6">
-          <h2 className="text-base font-medium">Passwort ändern</h2>
-          {status.data?.envPassword ? (
-            <p className="mt-3 text-sm text-muted">Das Passwort wird über die Umgebungsvariable <code className="font-mono text-text">ADMIN_PASSWORD</code> gesetzt.</p>
-          ) : (
-            <form onSubmit={change} className="mt-4 space-y-3">
-              <Field label="Aktuelles Passwort"><input type="password" className={inputCls} value={cur} onChange={(e) => setCur(e.target.value)} /></Field>
-              <Field label="Neues Passwort"><input type="password" className={inputCls} value={next} onChange={(e) => setNext(e.target.value)} placeholder="Mindestens 8 Zeichen" /></Field>
-              {error && <ErrorBox>{error}</ErrorBox>}
-              <Button type="submit" variant="primary" loading={busy}>Speichern</Button>
-            </form>
-          )}
-        </Card>
+        <AdminSettings />
         <Card className="p-6">
           <h2 className="text-base font-medium">So arbeitet FlowVault</h2>
           <ul className="mt-4 list-disc space-y-2 pl-4 text-sm text-muted marker:text-dim">

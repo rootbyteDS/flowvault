@@ -29,6 +29,16 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS auth_challenges (
+    token         TEXT PRIMARY KEY,
+    kind          TEXT NOT NULL,
+    session_token TEXT REFERENCES sessions(token) ON DELETE CASCADE,
+    secret_enc    TEXT,
+    expires_at    INTEGER NOT NULL,
+    attempts      INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_auth_challenges_session ON auth_challenges(session_token);
+
   CREATE TABLE IF NOT EXISTS instances (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL,

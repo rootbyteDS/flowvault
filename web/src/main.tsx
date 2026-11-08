@@ -10,6 +10,7 @@ import { api } from './api.ts';
 import { Layout } from './components/Layout.tsx';
 import { PageLoader, ToastProvider } from './components/ui.tsx';
 import { Login } from './pages/Login.tsx';
+import type { AuthStatus } from '../../shared/auth.ts';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { Instances } from './pages/Instances.tsx';
 import { InstanceDetail } from './pages/InstanceDetail.tsx';
@@ -20,11 +21,9 @@ import { Promote } from './pages/Promote.tsx';
 import { ActivityPage } from './pages/Activity.tsx';
 import { SettingsPage } from './pages/Settings.tsx';
 
-type AuthState = { setup: boolean; authenticated: boolean };
-
 function App() {
-  const [auth, setAuth] = useState<AuthState>();
-  const check = useCallback(() => api<AuthState>('/auth/status').then(setAuth), []);
+  const [auth, setAuth] = useState<AuthStatus>();
+  const check = useCallback(() => api<AuthStatus>('/auth/status').then(setAuth), []);
 
   useEffect(() => {
     check();
@@ -34,7 +33,7 @@ function App() {
   }, [check]);
 
   if (!auth) return <PageLoader />;
-  if (!auth.authenticated) return <Login setup={!auth.setup} onDone={check} />;
+  if (!auth.authenticated || auth.emailRequired) return <Login key={`${auth.authenticated}:${auth.setup}`} status={auth} onDone={check} />;
 
   return (
     <Routes>

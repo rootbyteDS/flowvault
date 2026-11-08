@@ -12,13 +12,15 @@
     "dev": "concurrently -n api,web -c magenta,cyan \"node --watch-path=server --watch-path=services --watch-path=shared server/index.ts\" \"vite\"",
     "build": "vite build",
     "start": "NODE_ENV=production node server/index.ts",
-    "test": "node --test server/promote/transform.test.ts services/health/analysis.test.ts",
+    "test": "node --test server/auth.test.ts server/promote/transform.test.ts services/health/analysis.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "mock-n8n": "node scripts/mock-n8n.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "otpauth": "^9.6.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@fontsource-variable/archivo": "^5.3.0",
@@ -26,6 +28,7 @@
     "@tailwindcss/vite": "^4.3.5",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",

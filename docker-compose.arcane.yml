@@ -1,0 +1,24 @@
+# In Arcane als neues Projekt einfügen und mit "Build & Deploy" starten.
+# In Arcanes .env-Editor APP_SECRET setzen (openssl rand -base64 32).
+# Der Build lädt den Quellcode direkt aus dem öffentlichen GitHub-Repository.
+services:
+  flowvault:
+    build:
+      context: https://github.com/rootbyteDS/flowvault.git#main
+      dockerfile: Dockerfile
+    container_name: flowvault
+    restart: unless-stopped
+    ports:
+      # Zugriff von außen über einen Reverse Proxy mit HTTPS einrichten.
+      - "127.0.0.1:4000:4000"
+    environment:
+      APP_SECRET: ${APP_SECRET:?Bitte APP_SECRET in Arcane setzen}
+      # Optional: festes Passwort. Leer = Einrichtungscode aus den Container-Logs.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Bei Betrieb hinter einem Reverse Proxy in Arcane TRUST_PROXY=1 setzen.
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+    volumes:
+      - flowvault-data:/data
+
+volumes:
+  flowvault-data:

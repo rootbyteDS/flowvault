@@ -6,7 +6,7 @@ import { hashPassword, randomToken, safeEqual, sha256, verifyPassword } from './
 const COOKIE = 'fv_session';
 const TTL = 30 * 24 * 60 * 60 * 1000;
 
-function readCookie(req: Request, name: string) {
+export function readCookie(req: Request, name: string) {
   const header = req.headers.cookie ?? '';
   for (const part of header.split(';')) {
     const [k, ...v] = part.trim().split('=');
@@ -24,6 +24,20 @@ export function isSetUp() {
   return !!(process.env.ADMIN_PASSWORD || getSetting('admin_password'));
 }
 
+export function adminEmail() {
+  return (process.env.ADMIN_EMAIL || getSetting('admin_email') || '').trim().toLowerCase();
+}
+
+export function sessionHash(req: Request) {
+  const token = readCookie(req, COOKIE);
+  return token ? sha256(token) : '';
+}
+
+export function setAuthCookie(req: Request, res: Response, name: string, token: string, ttl: number) {
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.append('Set-Cookie', `${name}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${ttl / 1000}${secure ? '; Secure' : ''}`);
+}
+
 // ───────────── Ersteinrichtung ─────────────
 
 /**
@@ -36,7 +50,7 @@ let setupCode: string | null = null;
 export function announceSetupCode() {
   if (isSetUp()) return;
   setupCode = crypto.randomBytes(6).toString('hex').toUpperCase().replace(/(.{4})(?=.)/g, '$1-');
-  console.log(`  Einrichtungscode für das Admin-Passwort: ${setupCode}\n`);
+  console.log(`  Einrichtungscode für das Admin-Konto: ${setupCode}\n`);
 }
 
 /** Prüft den Code und verbraucht ihn bei Erfolg, damit parallele Einrichtungen scheitern. */
@@ -70,30 +84,36 @@ export function isAuthenticated(req: Request) {
 }
 
 export function createSession(req: Request, res: Response) {
+  db.prepare('DELETE FROM sessions WHERE token = ?').run(sessionHash(req));
   const token = randomToken();
   db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
   db.prepare('INSERT INTO sessions (token, expires_at) VALUES (?, ?)').run(sha256(token), Date.now() + TTL);
-  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  res.setHeader(
-    'Set-Cookie',
-    `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${TTL / 1000}${secure ? '; Secure' : ''}`,
-  );
+  setAuthCookie(req, res, COOKIE, token, TTL);
 }
 
 export function destroySession(req: Request, res: Response) {
   const token = readCookie(req, COOKIE);
   if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(sha256(token));
-  res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+  setAuthCookie(req, res, COOKIE, '', 0);
 }
 
 /** Meldet alle Geräte ab, z. B. nach einem Passwortwechsel. */
 export function destroyAllSessions() {
   db.prepare('DELETE FROM sessions').run();
+  db.prepare('DELETE FROM auth_challenges').run();
+  setSetting('auth_revision', randomToken());
+}
+
+export function requireSession(req: Request, res: Response, next: NextFunction) {
+  if (isAuthenticated(req)) return next();
+  res.status(401).json({ error: 'Nicht angemeldet' });
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (isAuthenticated(req)) return next();
-  res.status(401).json({ error: 'Nicht angemeldet' });
+  requireSession(req, res, () => {
+    if (!adminEmail()) return res.status(403).json({ error: 'Bitte zuerst die Admin-E-Mail hinterlegen' });
+    next();
+  });
 }
 
 // ───────────── Bremse gegen Passwort-Raten ─────────────
