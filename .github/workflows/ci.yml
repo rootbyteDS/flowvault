@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Node.js ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.18.0', '24']
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Node.js einrichten
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Abhängigkeiten installieren
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: TypeScript prüfen
+        run: npm run typecheck
+      - name: Frontend bauen
+        run: npm run build

@@ -1,0 +1,56 @@
+@import 'tailwindcss';
+
+/* Farben & Schriften aus dem flown8tive-Design-System (Night-Variante) */
+@theme {
+  --font-sans: 'Archivo Variable', 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --color-sidebar: #11151c;
+  --color-bg: #151a23;      /* night */
+  --color-panel: #1a1f29;   /* Karte */
+  --color-panel-2: #1c222d; /* night-2, Hover */
+  --color-panel-3: #232a36; /* erhöht: aktive Zeile, Eingabe */
+  --color-line: rgb(239 233 223 / 0.08);
+  --color-line-2: rgb(239 233 223 / 0.13);
+  --color-text: #efe9df;    /* night-text */
+  --color-muted: #a3a8b2;   /* night-muted, sekundär */
+  --color-dim: #80868f;     /* gedämpft: Meta, Icons */
+
+  --color-accent: #c2663f;        /* copper – Flächen & Linien */
+  --color-accent-hi: #e39a70;     /* copper-hi – als Text auf Dunkel */
+  --color-accent-strong: #a9552f; /* copper-strong – Button mit weißer Schrift */
+
+  --color-add: #4cc38a;
+  --color-del: #e5484d;
+  --color-mod: #d9b44a;
+  --color-info: #8aaed9;
+
+  --ease-brand: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --animate-enter: enter 200ms var(--ease-brand) both;
+  @keyframes enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--color-line-2) transparent; }
+
+/* Ein Icon-Set, eine Strichstärke */
+svg.lucide { stroke-width: 1.5px; }
+
+/* Punktraster nur auf der Workflow-Canvas */
+.bg-grid {
+  background-image: radial-gradient(circle at 1px 1px, rgb(239 233 223 / 0.07) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+:where(:focus-visible) { outline: 2px solid var(--color-accent-hi); outline-offset: 2px; }

@@ -1,0 +1,41 @@
+{
+  "name": "flowvault",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Versionierung & Backup für n8n-Workflows – wie GitHub, nur für n8n.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"node --watch-path=server --watch-path=services --watch-path=shared server/index.ts\" \"vite\"",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server/index.ts",
+    "test": "node --test server/promote/transform.test.ts services/health/analysis.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "mock-n8n": "node scripts/mock-n8n.ts"
+  },
+  "dependencies": {
+    "diff": "^8.0.4",
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "concurrently": "^10.0.7",
+    "lucide-react": "^1.70.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router": "^8.5.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6"
+  }
+}

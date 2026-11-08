@@ -1,0 +1,23 @@
+# Abhängigkeiten und generierte Dateien
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+
+# Lokale Konfiguration, Zugangsdaten und Laufzeitdaten
+data/
+.env
+.env.*
+!.env.example
+*.key
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite*-wal
+*.sqlite*-shm
+
+# macOS
+.DS_Store

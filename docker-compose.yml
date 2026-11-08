@@ -1,0 +1,23 @@
+services:
+  flowvault:
+    build: .
+    container_name: flowvault
+    restart: unless-stopped
+    ports:
+      # Nur lokal erreichbar. Von außen über einen Reverse Proxy mit HTTPS (Caddy, Traefik, nginx)
+      # freigeben – nicht "4000:4000" eintragen: Docker umgeht dabei auch die Firewall (ufw).
+      - "127.0.0.1:4000:4000"
+    environment:
+      # Langer, zufälliger Wert – verschlüsselt die n8n-API-Keys. NICHT verlieren!
+      APP_SECRET: ${APP_SECRET:?Bitte APP_SECRET in .env setzen}
+      # Optional: festes Admin-Passwort. Sonst beim ersten Aufruf festlegen – mit dem
+      # Einrichtungscode aus `docker logs flowvault`.
+      # ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      # Hinter einem Reverse Proxy (Caddy, Traefik, nginx) unbedingt setzen – sonst teilen sich
+      # alle Nutzer die IP des Proxys und die Login-Sperre trifft alle gleichzeitig:
+      # TRUST_PROXY: "1"
+    volumes:
+      - flowvault-data:/data
+
+volumes:
+  flowvault-data:
