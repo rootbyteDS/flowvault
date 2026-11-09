@@ -15,6 +15,12 @@ In einem zweiten Terminal kannst du `npm run mock-n8n` starten. Verbinde in Flow
 
 ## Änderungen prüfen
 
+Jede abgeschlossene Änderung braucht eine höhere Projektversion. Mit
+`npm run version:bump` die Patch-Version in beiden Paketdateien erhöhen und mit
+`npm run version:check -- HEAD` prüfen. Der Git-Hook übernimmt einen vergessenen
+Versionssprung vor dem Commit; die CI prüft zusätzlich gegen den Vergleichsstand.
+Details: [Versionierung](docs/VERSIONING.md).
+
 Vor einem Pull Request:
 
 ```bash

@@ -1,6 +1,7 @@
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY package*.json ./
+COPY scripts/install-hooks.ts ./scripts/install-hooks.ts
 RUN npm ci
 COPY . .
 ARG APP_REVISION

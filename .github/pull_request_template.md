@@ -4,6 +4,8 @@
 
 ## Prüfung
 
+- [ ] Projektversion erhöht (`package.json` und `package-lock.json`)
+
 <!-- Welche Prüfungen wurden ausgeführt und mit welchem Ergebnis?
      npm test · npm run typecheck · npm run build
      Bei UI-Änderungen: Browserprüfung beschreiben. -->

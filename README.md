@@ -89,6 +89,8 @@ docker compose up -d
 
 ## Version und Updates
 
+Jede abgeschlossene Projektänderung erhält eine höhere Version. Versionshook, CI-Prüfung und Ablauf sind unter [Versionierung](docs/VERSIONING.md) beschrieben.
+
 Die installierte Versionsnummer steht unten in der Seitenleiste. Ein Klick darauf öffnet **Einstellungen → Über FlowVault**. Dort siehst du zusätzlich den Git-Commit (falls bekannt) und im Docker-Image das Build-Datum. Lokale Änderungen werden gesondert markiert. Die Angaben kommen vom laufenden Server, nicht aus einer fest eingetragenen Versionsnummer im Frontend. Es gibt derzeit keine automatische Prüfung auf neuere Releases.
 
 ### Manuell aktualisieren
