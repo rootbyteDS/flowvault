@@ -122,6 +122,8 @@ addColumn('versions', 'ai_summary', 'TEXT'); // JSON { title, details[] }
 addColumn('versions', 'ai_status', 'TEXT'); //  pending | done | error
 addColumn('versions', 'ai_error', 'TEXT');
 addColumn('versions', 'ai_model', 'TEXT');
+// Archivierte Workflows nur auf Wunsch sichern (Standard: aus)
+addColumn('instances', 'include_archived', 'INTEGER NOT NULL DEFAULT 0');
 
 export function getSetting(key: string): string | undefined {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;

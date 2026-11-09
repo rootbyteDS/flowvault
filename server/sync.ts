@@ -14,6 +14,7 @@ export interface InstanceRow {
   color: string;
   sync_interval: number;
   enabled: number;
+  include_archived: number;
   last_sync_at: number | null;
   last_sync_ok: number | null;
   last_sync_error: string | null;
@@ -167,14 +168,24 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
   const started = Date.now();
   const run = db.prepare('INSERT INTO sync_runs (instance_id, started_at, trigger) VALUES (?,?,?)').run(instanceId, started, trigger);
   const runId = Number(run.lastInsertRowid);
-  const stats = { total: 0, created: 0, changed: 0, deleted: 0 };
+  const stats = { total: 0, created: 0, changed: 0, deleted: 0, archivedSkipped: 0 };
 
   try {
     const workflows = await clientFor(inst).listWorkflows();
-    stats.total = workflows.length;
     const seen = new Set<string>();
+    const now0 = Date.now();
     for (const wf of workflows) {
+      // Auch übersprungene als „gesehen“ zählen – sonst gälten sie als in n8n gelöscht
       seen.add(String(wf.id));
+      if (wf.isArchived && !inst.include_archived) {
+        // Keine neue Version. Schon bekannte Historie bleibt, wird nur als archiviert markiert.
+        db.prepare('UPDATE workflows SET archived = 1, last_seen_at = ?, deleted_at = NULL WHERE instance_id = ? AND n8n_id = ?').run(
+          now0, inst.id, String(wf.id),
+        );
+        stats.archivedSkipped++;
+        continue;
+      }
+      stats.total++;
       const r = recordWorkflow(inst, wf);
       if (r === 'created') stats.created++;
       if (r === 'changed') stats.changed++;

@@ -82,6 +82,7 @@ export interface Instance {
   color: string;
   sync_interval: number;
   enabled: boolean;
+  include_archived: boolean;
   last_sync_at: number | null;
   last_sync_ok: boolean | null;
   last_sync_error: string | null;

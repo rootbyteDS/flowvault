@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleCheck, CircleX, PlugZap } from 'lucide-react';
 import { api, type Instance } from '../api.ts';
-import { Button, ErrorBox, Field, Modal, inputCls, useToast } from './ui.tsx';
+import { Button, ErrorBox, Field, Modal, Switch, inputCls, useToast } from './ui.tsx';
 import { cx } from '../util.ts';
 
 const COLORS = ['#ff6d5a', '#ea4b71', '#a78bfa', '#58a6ff', '#2dd4bf', '#3fb950', '#e3a92b', '#94a3b8'];
@@ -22,7 +22,7 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
   onSaved: (i: Instance) => void;
 }) {
   const toast = useToast();
-  const [form, setForm] = useState({ name: '', base_url: '', api_key: '', sync_interval: 15, color: COLORS[0] });
+  const [form, setForm] = useState({ name: '', base_url: '', api_key: '', sync_interval: 15, color: COLORS[0], include_archived: false });
   const [test, setTest] = useState<{ ok: boolean; text: string }>();
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,8 +32,8 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
     if (!open) return;
     setForm(
       instance
-        ? { name: instance.name, base_url: instance.base_url, api_key: '', sync_interval: instance.sync_interval, color: instance.color }
-        : { name: '', base_url: '', api_key: '', sync_interval: 15, color: COLORS[Math.floor(Math.random() * COLORS.length)] },
+        ? { name: instance.name, base_url: instance.base_url, api_key: '', sync_interval: instance.sync_interval, color: instance.color, include_archived: instance.include_archived }
+        : { name: '', base_url: '', api_key: '', sync_interval: 15, color: COLORS[Math.floor(Math.random() * COLORS.length)], include_archived: false },
     );
     setTest(undefined);
     setError(undefined);
@@ -156,6 +156,19 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
             </div>
           </Field>
         </div>
+
+        <Switch
+          checked={form.include_archived}
+          onChange={(v) => set('include_archived', v)}
+          label="Archivierte Workflows sichern"
+          hint="Standardmäßig aus: In n8n archivierte Workflows werden übersprungen."
+          info={
+            <>
+              <p><b>Aus</b> (Standard): Archivierte Workflows bekommen keine neuen Versionen und tauchen in Listen und Zahlen nicht auf. Was schon gesichert war, bleibt erhalten und ist unter Workflows → „Archiviert“ zu finden.</p>
+              <p><b>An</b>: Archivierte Workflows werden wie alle anderen gesichert. Holst du einen Workflow in n8n aus dem Archiv zurück, sichert FlowVault ihn ohnehin wieder.</p>
+            </>
+          }
+        />
 
         <div className="flex items-center gap-3 rounded-lg border border-line px-3 py-3">
           <Button size="sm" onClick={runTest} loading={testing} icon={<PlugZap className="size-4" />} disabled={!form.base_url}>

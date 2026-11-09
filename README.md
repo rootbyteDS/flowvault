@@ -16,6 +16,7 @@ Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workfl
 - **Wiederherstellen**: Version zurück nach n8n schreiben – oder als Kopie anlegen, auch auf einer anderen Instanz (Staging → Prod)
 - **Umgebungen (Staging → Prod)**: Workflows zwischen Instanzen übernehmen, ohne an IDs zu scheitern – FlowVault ersetzt Credentials, Sub-Workflow-/Error-Workflow-IDs, Data-Table-IDs und Webhook-Pfade anhand einmal gespeicherter Zuordnungen. Die Drift-Ansicht zeigt, welche Workflows zwischen zwei Instanzen abweichen und in welche Richtung (siehe [Umgebungen](#umgebungen-staging--produktion))
 - **Gelöschte Workflows** bleiben mit kompletter Historie erhalten
+- **Archivierte Workflows** werden standardmäßig übersprungen. Pro Instanz einschaltbar unter *Instanz bearbeiten → Archivierte Workflows sichern*. Schon gesicherte Historie bleibt erhalten (Workflows → „Archiviert“).
 - **Welche Änderung hat es kaputt gemacht?** FlowVault holt die Ausführungen aus n8n und legt sie über die Versionshistorie: Fehlerquote pro Version („seit v14 schlagen 38 % fehl, vorher 0 %“), im Diff-Canvas rot markiert, welcher Node seit der Änderung scheitert, und bei einem Anstieg eine Warnung mit Rollback-Vorschlag. Rollback per Klick. Läuft als eigener Prozess innerhalb von FlowVault, siehe [Health-Dienst](#health-dienst-fehlerquote-pro-version)
 - **Download** jeder Version als n8n-importierbares JSON
 - Aktivitäts-Feed und Heatmap, Sync-Protokoll pro Instanz

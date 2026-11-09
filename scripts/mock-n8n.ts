@@ -8,6 +8,7 @@
  *                               (?workflow=Name, ?rate=0.4). Ein Wiederherstellen per PUT repariert ihn.
  *   POST /_mock/fix           → alle Workflows laufen wieder fehlerfrei
  *   POST /_mock/run?n=20      → erzeugt sofort n Ausführungen pro aktivem Workflow
+ *   POST /_mock/archive?workflow=Name → archiviert einen Workflow bzw. holt ihn zurück („Old Newsletter“ ist archiviert)
  *   Ausführungen entstehen außerdem alle 20 s von selbst (MOCK_EXEC_MS).
  *   /v1/models, /v1/chat/completions → Nachbau der Melious-API (Key: test-ai-key)
  *     In FlowVault als Basis-URL http://localhost:5679/v1 eintragen.
@@ -24,7 +25,7 @@ type Node = { id: string; name: string; type: string; typeVersion: number; posit
 type Wf = {
   id: string; name: string; active: boolean; nodes: Node[]; connections: Record<string, unknown>;
   settings: Record<string, unknown>; staticData: unknown; tags: { id: string; name: string }[];
-  versionId: string; createdAt: string; updatedAt: string; pinData?: Record<string, unknown>;
+  versionId: string; createdAt: string; updatedAt: string; pinData?: Record<string, unknown>; isArchived?: boolean;
 };
 
 const node = (name: string, type: string, x: number, y: number, parameters: Record<string, unknown> = {}): Node => ({
@@ -90,6 +91,12 @@ workflows.push(
     node('After Call', 'noOp', 220, 0),
   ], link([['Call Alerts', 'After Call']]), ['ops']),
 );
+
+// Archivierter Workflow – FlowVault sichert ihn nur, wenn das bei der Instanz eingeschaltet ist
+workflows.push({
+  ...make('Old Newsletter', false, [node('Every Monday', 'scheduleTrigger', 0, 0), node('Send Newsletter', 'emailSend', 220, 0)], link([['Every Monday', 'Send Newsletter']]), ['marketing']),
+  isArchived: true,
+});
 
 // Startzustand: zuletzt vor drei Tagen gespeichert, damit die Ausführungs-Historie einer Version zugeordnet werden kann
 const THREE_DAYS = 3 * 864e5;
@@ -203,6 +210,14 @@ http.createServer(async (req, res) => {
   if (url.pathname === '/_mock/fix') {
     broken.clear();
     return send(res, 200, { ok: true });
+  }
+  if (url.pathname === '/_mock/archive') {
+    const wf = workflows.find((w) => w.name === url.searchParams.get('workflow'));
+    if (!wf) return send(res, 404, { error: 'Workflow nicht gefunden' });
+    wf.isArchived = !wf.isArchived;
+    if (wf.isArchived) wf.active = false;
+    wf.updatedAt = now();
+    return send(res, 200, { name: wf.name, isArchived: wf.isArchived });
   }
   if (url.pathname === '/_mock/run') {
     const n = Math.min(500, Number(url.searchParams.get('n') ?? 20));

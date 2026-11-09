@@ -120,7 +120,9 @@ export function latestWorkflows(instanceId: number, opts: { includeDeleted?: boo
               (SELECT id FROM versions WHERE workflow_id = w.id ORDER BY number DESC LIMIT 1) AS version_id,
               (SELECT number FROM versions WHERE workflow_id = w.id ORDER BY number DESC LIMIT 1) AS version_number
          FROM workflows w
-        WHERE w.instance_id = ? ${opts.includeDeleted ? '' : 'AND w.deleted_at IS NULL'}`,
+        WHERE w.instance_id = ? ${opts.includeDeleted ? '' : 'AND w.deleted_at IS NULL'}
+          -- archivierte nur, wenn die Instanz sie sichern soll
+          AND (w.archived = 0 OR (SELECT include_archived FROM instances WHERE id = w.instance_id) = 1)`,
     )
     .all(instanceId) as unknown as (WorkflowRow & { version_id: number | null; version_number: number | null })[];
   const out: LatestWorkflow[] = [];

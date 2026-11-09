@@ -6,7 +6,7 @@ import { WorkflowTable } from '../components/WorkflowTable.tsx';
 import { Card, EmptyState, ErrorBox, PageHeader, PageLoader, Segmented, inputCls } from '../components/ui.tsx';
 import { cx } from '../util.ts';
 
-type Status = 'present' | 'active' | 'inactive' | 'deleted' | 'all';
+type Status = 'present' | 'active' | 'inactive' | 'archived' | 'deleted' | 'all';
 
 export function Workflows() {
   const [params, setParams] = useSearchParams();
@@ -51,6 +51,7 @@ export function Workflows() {
               { value: 'present', label: 'Vorhanden' },
               { value: 'active', label: 'Aktiv' },
               { value: 'inactive', label: 'Inaktiv' },
+              { value: 'archived', label: 'Archiviert' },
               { value: 'deleted', label: 'Gelöscht' },
               { value: 'all', label: 'Alle' },
             ]}

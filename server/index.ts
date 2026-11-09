@@ -142,13 +142,14 @@ function publicInstance(i: InstanceRow) {
               SUM(CASE WHEN deleted_at IS NULL AND active = 1 THEN 1 ELSE 0 END) AS active,
               SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS deleted,
               COALESCE(SUM(version_count), 0) AS versions
-         FROM workflows WHERE instance_id = ?`,
+         FROM workflows WHERE instance_id = ? AND (archived = 0 OR ? = 1)`,
     )
-    .get(i.id) as { workflows: number; active: number | null; deleted: number | null; versions: number };
+    .get(i.id, i.include_archived) as { workflows: number; active: number | null; deleted: number | null; versions: number };
   const { api_key_enc: _omit, ...rest } = i;
   return {
     ...rest,
     enabled: !!i.enabled,
+    include_archived: !!i.include_archived,
     last_sync_ok: i.last_sync_ok === null ? null : !!i.last_sync_ok,
     key_hint: keyHint,
     syncing: isSyncing(i.id),
@@ -172,7 +173,8 @@ function instanceInput(body: Record<string, unknown>, partial = false) {
   }
   const interval = Math.max(0, Math.min(1440, Math.round(Number(body.sync_interval ?? 15))));
   const color = /^#[0-9a-f]{6}$/i.test(String(body.color ?? '')) ? String(body.color) : '#ea4b71';
-  return { name, base_url, interval, color };
+  const include_archived = body.include_archived ? 1 : 0;
+  return { name, base_url, interval, color, include_archived };
 }
 
 app.get('/api/instances', (_req, res) => {
@@ -208,12 +210,12 @@ app.post('/api/instances/test', async (req, res) => {
 });
 
 app.post('/api/instances', (req, res) => {
-  const { name, base_url, interval, color } = instanceInput(req.body ?? {});
+  const { name, base_url, interval, color, include_archived } = instanceInput(req.body ?? {});
   const key = String(req.body?.api_key ?? '').trim();
   if (!key) throw new HttpError(400, 'API-Key fehlt');
   const r = db
-    .prepare('INSERT INTO instances (name, base_url, api_key_enc, color, sync_interval, created_at) VALUES (?,?,?,?,?,?)')
-    .run(name, base_url, encrypt(key), color, interval, Date.now());
+    .prepare('INSERT INTO instances (name, base_url, api_key_enc, color, sync_interval, include_archived, created_at) VALUES (?,?,?,?,?,?,?)')
+    .run(name, base_url, encrypt(key), color, interval, include_archived, Date.now());
   const id = Number(r.lastInsertRowid);
   syncInstance(id, 'manual').catch(() => {});
   res.status(201).json(publicInstance(getInstance(id)!));
@@ -222,13 +224,15 @@ app.post('/api/instances', (req, res) => {
 app.put('/api/instances/:id', (req, res) => {
   const inst = getInstance(num(req.params.id));
   if (!inst) throw new HttpError(404, 'Instanz nicht gefunden');
-  const { name, base_url, interval, color } = instanceInput({ ...inst, ...req.body });
+  const { name, base_url, interval, color, include_archived } = instanceInput({ ...inst, ...req.body });
   const key = String(req.body?.api_key ?? '').trim();
   if (!key && base_url !== inst.base_url) throw new HttpError(400, KEY_REQUIRED);
   const enabled = req.body?.enabled === undefined ? inst.enabled : req.body.enabled ? 1 : 0;
-  db.prepare('UPDATE instances SET name=?, base_url=?, color=?, sync_interval=?, enabled=?, api_key_enc=? WHERE id=?').run(
-    name, base_url, color, interval, enabled, key ? encrypt(key) : inst.api_key_enc, inst.id,
+  db.prepare('UPDATE instances SET name=?, base_url=?, color=?, sync_interval=?, enabled=?, include_archived=?, api_key_enc=? WHERE id=?').run(
+    name, base_url, color, interval, enabled, include_archived, key ? encrypt(key) : inst.api_key_enc, inst.id,
   );
+  // Gerade eingeschaltet: archivierte Workflows gleich sichern statt erst beim nächsten Intervall
+  if (include_archived && !inst.include_archived) syncInstance(inst.id, 'manual').catch(() => {});
   res.json(publicInstance(getInstance(inst.id)!));
 });
 
@@ -274,7 +278,8 @@ app.get('/api/overview', (_req, res) => {
   const stats = db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM instances) AS instances,
-              (SELECT COUNT(*) FROM workflows WHERE deleted_at IS NULL) AS workflows,
+              (SELECT COUNT(*) FROM workflows w JOIN instances i ON i.id = w.instance_id
+                WHERE w.deleted_at IS NULL AND (w.archived = 0 OR i.include_archived = 1)) AS workflows,
               (SELECT COUNT(*) FROM workflows WHERE deleted_at IS NULL AND active = 1) AS active,
               (SELECT COUNT(*) FROM versions) AS versions,
               (SELECT COUNT(*) FROM versions WHERE created_at > ?) AS versions_7d,
@@ -324,9 +329,12 @@ app.get('/api/workflows', (req, res) => {
     params.push(q, q, String(req.query.q));
   }
   const status = String(req.query.status ?? 'present');
-  if (status === 'present') where.push('w.deleted_at IS NULL');
+  // Archivierte nur zeigen, wenn die Instanz sie sichert – oder ausdrücklich danach gefragt wird
+  const notHiddenArchived = '(w.archived = 0 OR i.include_archived = 1)';
+  if (status === 'present') where.push(`w.deleted_at IS NULL AND ${notHiddenArchived}`);
   if (status === 'active') where.push('w.deleted_at IS NULL AND w.active = 1');
-  if (status === 'inactive') where.push('w.deleted_at IS NULL AND w.active = 0');
+  if (status === 'inactive') where.push(`w.deleted_at IS NULL AND w.active = 0 AND ${notHiddenArchived}`);
+  if (status === 'archived') where.push('w.deleted_at IS NULL AND w.archived = 1');
   if (status === 'deleted') where.push('w.deleted_at IS NOT NULL');
 
   const rows = db
