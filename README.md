@@ -161,12 +161,16 @@ Weitere Sprachen sind ein Ordner mit Textdateien, ohne Eingriff in den Programmc
 
 Kopieren zwischen Instanzen scheitert in der Praxis an IDs, die überall anders sind: Credentials („Slack Staging“ ↔ „Slack Prod“), Sub-Workflow-IDs in Execute Workflow, Error-Workflows in den Settings, Data-Table-IDs, Webhook-Pfade. **Umgebungen** unterstützt diese Übernahme über die n8n Public API mit eigenen Zuordnungen:
 
-- **Zuordnungen einmal speichern** (Umgebungen → Zuordnungen), pro Richtung (Staging → Prod und zurück getrennt). **Vorschläge** erkennt Gegenstücke automatisch: Credentials über die n8n Public API (der API-Key braucht dafür Lesezugriff auf Credentials) bzw. Namen ohne Umgebungszusatz, Sub-Workflows über die ohnehin gesicherten Workflows, Data-Tables und Webhook-Pfade aus den gespeicherten Snapshots.
-- **Drift-Ansicht**: welche Workflows weichen zwischen den Instanzen ab – gemessen am Stand *nach* Anwendung der Zuordnungen – und welche Seite die neuere Änderung hat. „Diff“ zeigt je Workflow, was eine Übernahme ändern würde.
-- **Übernehmen** überschreibt den Ziel-Workflow (der bisherige Stand bleibt als Version gesichert) oder legt ihn neu – inaktiv – an. Auch das Kopieren aus der Versionshistorie auf eine andere Instanz wendet dieselben Zuordnungen an.
-- Fehlende Zuordnungen zeigt FlowVault vor der Übernahme an; betroffene IDs bleiben dann unverändert.
+1. **Instanzpaar einrichten**: Quelle und Ziel ausdrücklich auswählen und für diese Richtung speichern. Es gibt keine automatische Auswahl der ersten beiden Instanzen. Die Gegenrichtung braucht eine eigene Einrichtung; vorhandene Zuordnungen bleiben erhalten, geben aber allein noch keine Übernahme frei.
+2. **Workflows zuordnen**: Für relevante Quell-Workflows das bestehende Gegenstück bestätigen oder „Neu auf dem Ziel anlegen (inaktiv)“ wählen. Gleiche IDs und Namen sind nur Vorschläge. Explizite Paarungen haben Vorrang; fehlende Ziele verlangen eine neue Entscheidung. Ein Ziel-Workflow kann innerhalb eines Paares nur einer Quelle zugeordnet werden. Nicht benötigte Workflows dürfen offen bleiben und werden als „Noch nicht zugeordnet“ angezeigt.
+3. **Abhängigkeiten zuordnen**: Credentials, Sub-/Error-Workflows und Data-Tables bestätigen. Vorschläge nutzen die n8n Public API (sofern Credential-Lesezugriff verfügbar ist) und gesicherte Snapshots. Credentials werden nach Typ gefiltert; mehrdeutige Namens-Treffer werden nicht als eindeutige Treffer behandelt. Ohne vollständigen API-Lesezugriff müssen Zielressourcen gegebenenfalls manuell angegeben und in n8n geprüft werden. Webhook-Pfade können ohne Ersetzung identisch bleiben.
+4. **Prüfen und übernehmen**: Workflows einzeln oder per Checkbox auswählen. Die Prüfung zeigt die konkreten Ziel-Workflows, Versionen, Änderungen per „Diff“ und zusätzlich benötigte neue Sub-/Error-Workflows. Diese werden nach bestätigter Neuanlage automatisch aufgenommen und vor ihren Aufrufern angelegt. Ihre neuen IDs werden im selben Lauf verwendet und für Wiederholungen gespeichert. Fehlende erforderliche Zuordnungen blockieren den gesamten Plan vor dem ersten Schreibzugriff.
 
-Workflow-Paarungen (Quell-ID ↔ Ziel-ID) merkt sich FlowVault bei jeder Übernahme selbst – die Zuordnung übersteht also auch Umbenennungen. Zugangsdaten bleiben verschlüsselt: Die Ziel-Instanz wird nur über ihre gespeicherte Adresse und ihren eigenen API-Key erreicht.
+Bestehende Ziel-Workflows werden vor dem Schreiben aus n8n gelesen und gesichert. Änderungen seit der Prüfung verlangen eine neue Prüfung; auch Änderungen an Quellversionen, Paarungen oder Instanzkonfiguration machen den Plan ungültig. Nach dem Schreiben wird der über die API schreibbare Inhalt zurückgelesen und verglichen. Bei einem Fehler werden folgende Übernahmen gestoppt und Einzelergebnisse angezeigt. Bereits erfolgte Schreibzugriffe bleiben bestehen; es gibt keine instanzübergreifende Transaktion und keine atomare Sperre gegen parallele Änderungen direkt im n8n-Editor.
+
+Neue zyklische Abhängigkeiten müssen zunächst separat auf dem Ziel angelegt und zugeordnet werden. Dynamische Workflow-/Data-Table-Referenzen können nicht statisch geprüft werden und blockieren die geprüfte Übernahme. Normale Expressions in Eingabefeldern bleiben unverändert. Die Ersetzung berücksichtigt auch n8n Resource-Locators (`{ value, mode, __rl }`). Aktiv-Status, Tags und Pin-Daten sind nicht Teil der schreibbaren n8n-Workflow-Payload; Aktivierung erfolgt separat in n8n.
+
+Auch das Kopieren aus der Versionshistorie auf eine andere Instanz verlangt ein eingerichtetes Paar und vollständige Referenz-Zuordnungen. Eine Kopie ersetzt keine bestehende Workflow-Paarung. Zugangsdaten bleiben verschlüsselt: Die Ziel-Instanz wird nur über ihre gespeicherte Adresse und ihren eigenen API-Key erreicht.
 
 ## Health-Dienst: Fehlerquote pro Version
 
@@ -220,7 +224,7 @@ server/          Node.js + Express (TypeScript, läuft nativ ohne Build)
   n8n.ts         Client für die n8n Public API
   internal.ts    Interne API für Dienste (Token) + Weiterleitung /api/health → Health-Dienst
   ai.ts          KI-Änderungstexte über Melious, Warteschlange, Secret-Filter
-  promote/        Umgebungen (Staging → Prod): ID-Zuordnungen, Drift-Ansicht, Übernahme
+  promote/        Umgebungen (Staging → Prod): Instanzpaare, Workflow-Paarungen, ID-Zuordnungen, Übernahmeplanung und Drift
     transform.ts  Ersetzt IDs in Snapshots – rein funktional + Tests
     mappings.ts  Zuordnungs-Speicher, Vorschläge, Workflow-Paarung
     drift.ts      Abweichungen zwischen zwei Instanzen

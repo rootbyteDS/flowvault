@@ -32,8 +32,8 @@ export function Heatmap({ days, firstBackup }: { days: Overview['days']; firstBa
   }
 
   const level = (n: number) => {
-    if (n < 0) return 'bg-transparent';
-    if (n === 0) return 'bg-panel-3';
+    if (n < 0) return 'bg-panel-3 border border-dashed border-line-2';
+    if (n === 0) return 'bg-panel-3 border border-line-2';
     const r = n / Math.max(max, 4);
     return r > 0.75 ? 'bg-accent' : r > 0.5 ? 'bg-accent/75' : r > 0.25 ? 'bg-accent/50' : 'bg-accent/30';
   };
@@ -75,7 +75,7 @@ export function Heatmap({ days, firstBackup }: { days: Overview['days']; firstBa
                 {col.map((c) => (
                   <div
                     key={c.day}
-                    className={cx('aspect-square w-full rounded-[3px]', level(c.n), !c.outside && c.before && 'border border-dashed border-line', c.day === today && 'ring-1 ring-text/40')}
+                    className={cx('aspect-square w-full rounded-[3px]', c.outside ? 'bg-transparent' : level(c.n), c.day === today && 'ring-1 ring-text/40')}
                     title={c.outside ? '' : c.before ? t('dashboard.heatmap.before', { date: dateLabel(c.day) }) : t('dashboard.heatmap.tip', { date: dateLabel(c.day), count: c.n })}
                   />
                 ))}
@@ -86,7 +86,7 @@ export function Heatmap({ days, firstBackup }: { days: Overview['days']; firstBa
       )}
       <div className="mt-4 flex items-center justify-end gap-1 text-xs text-dim">
         {t('dashboard.heatmap.less')}
-        {['bg-panel-3', 'bg-accent/30', 'bg-accent/50', 'bg-accent/75', 'bg-accent'].map((c) => (
+        {[level(0), 'bg-accent/30', 'bg-accent/50', 'bg-accent/75', 'bg-accent'].map((c) => (
           <span key={c} className={cx('size-2.5 rounded-[2px]', c)} />
         ))}
         {t('dashboard.heatmap.more')}

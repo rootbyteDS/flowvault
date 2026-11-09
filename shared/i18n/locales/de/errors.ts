@@ -85,6 +85,18 @@ export const errors = {
     coreStatus: 'Core antwortet mit HTTP {status}',
   },
   promote: {
+    pairRequired: 'Bitte zuerst dieses Instanzpaar für diese Richtung einrichten',
+    choiceRequired: 'Workflow „{name}“ zuerst einem Ziel zuordnen oder als neu bestätigen',
+    targetMissing: 'Der zugeordnete Ziel-Workflow fehlt – bitte die Paarung erneut prüfen',
+    targetUsed: 'Dieser Ziel-Workflow ist bereits einem anderen Quell-Workflow zugeordnet',
+    dependencyMissing: 'Abhängigkeit „{name}“ zuerst zuordnen oder als neu bestätigen',
+    cycle: 'Zyklische neue Abhängigkeit bei „{name}“ – zuerst Ziel-Workflows separat anlegen und zuordnen',
+    dynamicReference: '„{name}“ enthält dynamische Workflow-/Data-Table-Referenzen – für eine geprüfte Übernahme statische Zielzuordnungen verwenden',
+    stalePlan: 'Die Grundlage der Übernahme hat sich geändert. Bitte die Prüfung neu laden',
+    busy: 'Auf diese Ziel-Instanz läuft bereits eine Übernahme',
+    batchStopped: 'Nicht ausgeführt, weil eine vorherige Übernahme fehlgeschlagen ist',
+    verificationFailed: 'Der gespeicherte Ziel-Workflow entspricht nicht dem geplanten Inhalt. Bitte das Ergebnis prüfen',
+
     sameInstance: 'Quelle und Ziel müssen unterschiedliche Instanzen sein',
     notInSource: 'Workflow gehört nicht zur Quell-Instanz',
     noVersion: 'Keine gesicherte Version',

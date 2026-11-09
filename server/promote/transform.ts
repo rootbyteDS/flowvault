@@ -117,7 +117,7 @@ interface WalkCtx {
  * verschachtelten Parametern (dort bedeutet „path“ oft etwas anderes).
  */
 function walkParams(value: unknown, ctx: WalkCtx & { top?: boolean }): unknown {
-  if (Array.isArray(value)) return value.map((v) => walkParams(v, ctx));
+  if (Array.isArray(value)) return value.map((v) => walkParams(v, { ...ctx, top: false }));
   if (!value || typeof value !== 'object') return value;
   const top = ctx.top !== false;
   const out: Record<string, unknown> = {};
@@ -127,7 +127,14 @@ function walkParams(value: unknown, ctx: WalkCtx & { top?: boolean }): unknown {
       out[k] = next;
       continue;
     }
-    out[k] = walkParams(v, ctx);
+    // n8n resource locators store IDs in { __rl: true, value, mode }.
+    if ((k === 'workflowId' || k === 'dataTableId' || k === 'tableId') && v && typeof v === 'object' && !Array.isArray(v) && 'value' in v) {
+      const locator = v as Record<string, unknown>;
+      const id = locator.value;
+      out[k] = { ...locator, value: typeof id === 'string' && isPlainValue(id) ? mapValue(k, id, top, ctx) : id };
+      continue;
+    }
+    out[k] = walkParams(v, { ...ctx, top: false });
   }
   return out;
 }
@@ -170,4 +177,33 @@ function mapValue(key: string, v: string, top: boolean, ctx: WalkCtx): string {
   }
 
   return v;
+}
+
+/** Statische Workflow-Abhängigkeiten, einschließlich n8n Resource-Locators. */
+export function workflowDependencies(snap: Snapshot): string[] {
+  const ids = new Set<string>();
+  const walk = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, raw] of Object.entries(value)) {
+      const v = raw && typeof raw === 'object' && 'value' in raw ? (raw as { value: unknown }).value : raw;
+      if (key === 'workflowId' && isPlainValue(v)) ids.add(v);
+      else if (raw && typeof raw === 'object') walk(raw);
+    }
+  };
+  for (const n of snap.nodes ?? []) if (/executeWorkflow/i.test(n.type)) walk(n.parameters);
+  if (isPlainValue(snap.settings?.errorWorkflow)) ids.add(snap.settings.errorWorkflow);
+  return [...ids];
+}
+
+/** Dynamic resource IDs cannot be validated before execution. Ordinary input expressions are allowed. */
+export function hasDynamicReferences(snap: Snapshot): boolean {
+  const dynamic = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, raw]) => {
+      const v = raw && typeof raw === 'object' && 'value' in raw ? (raw as { value: unknown }).value : raw;
+      return ((key === 'workflowId' || key === 'dataTableId') && typeof v === 'string' && v.startsWith('=')) || dynamic(raw);
+    });
+  };
+  return snap.nodes.some((n) => dynamic(n.parameters)) ||
+    (typeof snap.settings.errorWorkflow === 'string' && snap.settings.errorWorkflow.startsWith('='));
 }

@@ -242,20 +242,32 @@ export interface DriftRow {
   source: DriftSide | null;
   target: DriftSide | null;
   matchedBy: 'mapping' | 'id' | 'name' | null;
-  status: 'in-sync' | 'drifted' | 'only-source' | 'only-target';
+  status: 'in-sync' | 'drifted' | 'only-source' | 'only-target' | 'unpaired';
   ahead: 'source' | 'target' | null;
   summary: ChangeSummary | null;
   activeDiffers: boolean;
   missing: string[];
 }
 
+export interface EnvironmentPair { sourceId: number; targetId: number; sourceName: string; targetName: string }
+export interface WorkflowChoice {
+  id: number; n8nId: string; name: string; decision: 'existing' | 'create' | null;
+  targetId: string | null; valid: boolean; suggestion: string | null;
+}
+export interface PromotePlan {
+  fingerprint: string;
+  blockers: string[];
+  items: { workflowId: number; name: string; version: number; action: 'created' | 'updated'; targetName: string | null; dependency: boolean }[];
+}
 export interface PromoteOverview {
+  configured: boolean;
+  choices: { sources: WorkflowChoice[]; targets: { n8nId: string; name: string }[] };
   source: { id: number; name: string; color: string; workflows: number };
   target: { id: number; name: string; color: string; workflows: number };
   mappings: MappingRow[];
   drift: {
     rows: DriftRow[];
-    counts: { inSync: number; drifted: number; onlySource: number; onlyTarget: number };
+    counts: { inSync: number; drifted: number; onlySource: number; onlyTarget: number; unpaired: number };
   };
 }
 

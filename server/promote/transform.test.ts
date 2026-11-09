@@ -119,3 +119,24 @@ test('verändert das Original nicht und arbeitet auf einer tiefen Kopie', () => 
   assert.equal((r.snapshot.nodes[0]!.parameters as Record<string, unknown>).workflowId, 'wf-prd');
   assert.equal(r.snapshot.settings!.errorWorkflow, 'wf-prd');
 });
+
+test('Resource-Locators ersetzen die value-ID und erhalten Auswahlmetadaten', () => {
+  const s = snap([
+    node({ type: 'n8n-nodes-base.executeWorkflow', parameters: { workflowId: { __rl: true, value: 'wf-src', mode: 'list', cachedResultName: 'Subflow' } } }),
+    node({ type: 'n8n-nodes-base.dataTable', parameters: { dataTableId: { __rl: true, value: 'dt-src', mode: 'list' } } }),
+  ]);
+  const result = transformSnapshot(s, mappings({ workflows: new Map([['wf-src', 'wf-target']]), dataTables: new Map([['dt-src', 'dt-target']]) }));
+  assert.deepEqual(result.snapshot.nodes[0]!.parameters!.workflowId, { __rl: true, value: 'wf-target', mode: 'list', cachedResultName: 'Subflow' });
+  assert.deepEqual(result.snapshot.nodes[1]!.parameters!.dataTableId, { __rl: true, value: 'dt-target', mode: 'list' });
+  assert.deepEqual(result.missing, []);
+});
+
+test('fehlende Resource-Locator-Referenzen werden gemeldet; verschachtelte Webhook-Pfade bleiben unverändert', () => {
+  const s = snap([
+    node({ type: 'n8n-nodes-base.executeWorkflow', parameters: { workflowId: { __rl: true, value: 'wf-src', mode: 'list' } } }),
+    node({ type: 'n8n-nodes-base.webhook', parameters: { path: 'lead', options: { path: 'lead' } } }),
+  ]);
+  const result = transformSnapshot(s, mappings({ webhookPaths: new Map([['lead', 'lead-prod']]) }));
+  assert.equal(result.missing.length, 1);
+  assert.deepEqual(result.snapshot.nodes[1]!.parameters, { path: 'lead-prod', options: { path: 'lead' } });
+});

@@ -5,6 +5,7 @@
  */
 import { diffWorkflows, type ChangeSummary } from '../../shared/diff.ts';
 import { latestWorkflows, mappingSetFor, targetWorkflowFor, workflowLabelsFor, type LatestWorkflow } from './mappings.ts';
+import { wantsCreate } from './pairs.ts';
 import { transformSnapshot } from './transform.ts';
 
 export interface DriftSide {
@@ -20,7 +21,7 @@ export interface DriftRow {
   source: DriftSide | null;
   target: DriftSide | null;
   matchedBy: 'mapping' | 'id' | 'name' | null;
-  status: 'in-sync' | 'drifted' | 'only-source' | 'only-target';
+  status: 'in-sync' | 'drifted' | 'only-source' | 'only-target' | 'unpaired';
   /** Welche Seite die neuere Änderung hat – nur bei „drifted“ gesetzt */
   ahead: 'source' | 'target' | null;
   /** Änderungen, die eine Übernahme auf dem Ziel bewirken würde (nur bei „drifted“) */
@@ -33,7 +34,7 @@ export interface DriftRow {
 
 export interface DriftResult {
   rows: DriftRow[];
-  counts: { inSync: number; drifted: number; onlySource: number; onlyTarget: number };
+  counts: { inSync: number; drifted: number; onlySource: number; onlyTarget: number; unpaired: number };
 }
 
 const side = (w: LatestWorkflow): DriftSide => ({
@@ -84,7 +85,7 @@ export function computeDrift(sourceId: number, targetId: number): DriftResult {
         source: side(src),
         target: null,
         matchedBy: null,
-        status: 'only-source',
+        status: wantsCreate(sourceId, targetId, src.row.n8n_id) ? 'only-source' : 'unpaired',
         ahead: 'source',
         summary: null,
         activeDiffers: false,
@@ -124,7 +125,7 @@ export function computeDrift(sourceId: number, targetId: number): DriftResult {
     });
   }
 
-  const order: Record<DriftRow['status'], number> = { drifted: 0, 'only-source': 1, 'only-target': 2, 'in-sync': 3 };
+  const order: Record<DriftRow['status'], number> = { unpaired: 0, drifted: 1, 'only-source': 2, 'only-target': 3, 'in-sync': 4 };
   rows.sort((a, b) => {
     const d = order[a.status] - order[b.status];
     if (d) return d;
@@ -136,6 +137,7 @@ export function computeDrift(sourceId: number, targetId: number): DriftResult {
   return {
     rows,
     counts: {
+      unpaired: rows.filter((r) => r.status === 'unpaired').length,
       inSync: rows.filter((r) => r.status === 'in-sync').length,
       drifted: rows.filter((r) => r.status === 'drifted').length,
       onlySource: rows.filter((r) => r.status === 'only-source').length,

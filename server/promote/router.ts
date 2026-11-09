@@ -19,6 +19,8 @@ import { listMappings, MAPPING_KINDS, mappingSetFor, suggestMappings, targetWork
 import { promoteWorkflows, type PromoteItem, type PromoteOutcome } from './promote.ts';
 import { transformSnapshot } from './transform.ts';
 import { diffWorkflows } from '../../shared/diff.ts';
+import { listPairs, savePair, pairConfigured, requirePair, workflowChoices, chooseWorkflow } from './pairs.ts';
+import { buildPlan } from './plan.ts';
 import { loadSnapshot } from '../sync.ts';
 
 const num = (v: unknown) => {
@@ -47,6 +49,8 @@ function instanceInfo(id: number, name: string, color: string) {
 export interface PromoteOverview {
   source: ReturnType<typeof instanceInfo>;
   target: ReturnType<typeof instanceInfo>;
+  configured: boolean;
+  choices: ReturnType<typeof workflowChoices>;
   mappings: MappingRow[];
   drift: DriftResult;
 }
@@ -57,12 +61,35 @@ function overview(sourceId: number, targetId: number): PromoteOverview {
   return {
     source: instanceInfo(source.id, source.name, source.color),
     target: instanceInfo(target.id, target.name, target.color),
+    configured: pairConfigured(sourceId, targetId),
+    choices: workflowChoices(sourceId, targetId),
     mappings: listMappings(sourceId, targetId),
     drift: computeDrift(sourceId, targetId),
   };
 }
 
 export const promoteRouter = Router();
+
+promoteRouter.get('/pairs', (_req, res) => res.json(listPairs()));
+promoteRouter.put('/:sourceId/:targetId/pair', (req, res) => {
+  const { sourceId, targetId } = pair(req);
+  savePair(sourceId, targetId);
+  res.json(overview(sourceId, targetId));
+});
+promoteRouter.put('/:sourceId/:targetId/workflows', (req, res) => {
+  const { sourceId, targetId } = pair(req);
+  const from = typeof req.body?.from === 'string' ? req.body.from : '';
+  const to = req.body?.to;
+  if (!from || (to !== null && (typeof to !== 'string' || !to))) throw new HttpError(400, 'errors.promote.emptyMapping');
+  chooseWorkflow(sourceId, targetId, from, to);
+  res.json(overview(sourceId, targetId));
+});
+promoteRouter.post('/:sourceId/:targetId/plan', (req, res) => {
+  const { sourceId, targetId } = pair(req);
+  const ids = Array.isArray(req.body?.workflowIds) ? req.body.workflowIds.map(num) : [];
+  if (ids.length > 200) throw new HttpError(400, 'errors.promote.tooMany');
+  res.json(buildPlan(sourceId, targetId, ids, requestT(req)));
+});
 
 promoteRouter.get('/:sourceId/:targetId', (req, res) => {
   const { sourceId, targetId } = pair(req);
@@ -90,12 +117,15 @@ promoteRouter.put('/:sourceId/:targetId/mappings', (req, res) => {
   const toName = body.toName ? String(body.toName).slice(0, 300) : null;
   if (!from || !to) throw new HttpError(400, 'errors.promote.emptyMapping');
   if (kind === 'credential' && !toName) throw new HttpError(400, 'errors.promote.credentialNeedsName');
-  upsertMapping(sourceId, targetId, { kind: kind as never, from, to, fromName, toName });
+  requirePair(sourceId, targetId);
+  if (kind === 'workflow') chooseWorkflow(sourceId, targetId, from, to);
+  else upsertMapping(sourceId, targetId, { kind: kind as never, from, to, fromName, toName });
   res.json(overview(sourceId, targetId));
 });
 
 promoteRouter.delete('/:sourceId/:targetId/mappings', (req, res) => {
   const { sourceId, targetId } = pair(req);
+  requirePair(sourceId, targetId);
   const kind = String(req.query.kind ?? '');
   const from = String(req.query.from ?? '');
   if (!MAPPING_KINDS.includes(kind as never) || !from) throw new HttpError(400, 'errors.promote.mappingAmbiguous');
@@ -147,8 +177,6 @@ promoteRouter.post('/:sourceId/:targetId/promote', async (req, res) => {
     .map((workflowId: number) => ({ workflowId }));
   if (!items.length) throw new HttpError(400, 'errors.promote.noWorkflows');
   if (items.length > 200) throw new HttpError(400, 'errors.promote.tooMany');
-  const results: PromoteOutcome[] = await promoteWorkflows(sourceId, targetId, items, requestT(req));
-  const failed = results.filter((r) => r.error);
-  if (failed.length === results.length) throw new HttpError(502, { raw: failed[0]!.error! });
+  const results: PromoteOutcome[] = await promoteWorkflows(sourceId, targetId, items, requestT(req), String(req.body?.fingerprint ?? ''));
   res.json({ results, overview: overview(sourceId, targetId) });
 });

@@ -1,6 +1,33 @@
 import type { Messages } from '../../types.ts';
 
 export const promote: Messages['promote'] = {
+  setup: {
+    reviewSelection: 'Review selection',
+    selectWorkflow: 'Select workflow',
+    setupTitle: '1. Set up an instance pair',
+    setupText: 'Choose source and target explicitly. Setup and mappings apply only to this direction.',
+    savedPairs: 'Saved instance pairs',
+    chooseInstance: '– Choose instance –',
+    savePair: 'Set up this instance pair',
+    configured: 'Instance pair configured',
+    workflowTab: '2. Pair workflows',
+    dependenciesTab: '3. Map dependencies',
+    reviewTab: '4. Review and transfer',
+    workflowText: 'Confirm the target of each relevant workflow or explicitly choose creation. Name and ID matches are suggestions only. Unneeded workflows can remain undecided.',
+    undecided: 'Not paired yet',
+    createChoice: 'Create on target (inactive)',
+    confirmChoice: 'Confirm pairing',
+    confirmedChoice: 'Confirmed',
+    continueDependencies: 'Next: dependencies',
+    continueReview: 'Next: review and transfer',
+    reviewTitle: 'Review transfer',
+    reviewLoading: 'Checking mappings and dependencies …',
+    reviewBlocked: 'Transfer blocked – resolve these issues first:',
+    reviewReady: 'All required mappings are resolved. These workflows will be transferred:',
+    includedDependency: 'required dependency',
+    retryReview: 'Reload review',
+    samePair: 'Choose two different instances.',
+  },
   subtitle:
     'Promote workflows between staging and production – FlowVault replaces credentials, sub-workflow IDs, data tables and webhook paths based on saved mappings.',
   subtitleShort: 'Promote workflows between staging and production – with automatic ID mapping',
@@ -51,7 +78,7 @@ export const promote: Messages['promote'] = {
       'From <b>{source}</b> to <b>{target}</b>: existing workflows are overwritten (the previous state stays saved in FlowVault), new ones are created inactive.',
     overwrite: 'overwrite',
     createNew: 'create new',
-    unmappedTitle: 'Without mapping – carried over unchanged:',
+    unmappedTitle: 'Unresolved mappings – transfer blocked:',
     more: '… and {count} more',
   },
   results: {
@@ -77,13 +104,13 @@ export const promote: Messages['promote'] = {
     suggestionsHeader: 'Suggestions – detected automatically from names, type and saved workflows',
     emptyTitle: 'No mappings yet',
     emptyText:
-      'Without mappings, IDs are carried over unchanged – “Suggestions” detects matching credentials, sub-workflows and data tables automatically.',
+      'Required references must be mapped before transfer. “Suggestions” helps with selection; each mapping must be confirmed.',
     removeTitle: 'Remove mapping',
     removed: 'Mapping for “{name}” removed',
     pathPlaceholder: 'Path on the target',
     choose: '– choose –',
   },
-  kind: { credential: 'Credential', workflow: 'Sub-workflow', webhookPath: 'Webhook path', dataTable: 'Data table' },
+  kind: { credential: 'Credential', workflow: 'Workflow', webhookPath: 'Webhook path', dataTable: 'Data table' },
   add: {
     title: 'Create mapping manually',
     kind: 'Type',

@@ -2,8 +2,9 @@ import { db, tx } from './db.ts';
 import { decrypt, pack, sha256, unpack } from './crypto.ts';
 import { N8nClient, type N8nWorkflow } from './n8n.ts';
 import { onVersionCreated } from './ai.ts';
-import { mappingSetFor, workflowLabelsFor } from './promote/mappings.ts';
-import { transformSnapshot } from './promote/transform.ts';
+import { mappingSetFor, workflowLabelsFor, targetWorkflowFor } from './promote/mappings.ts';
+import { requirePair } from './promote/pairs.ts';
+import { transformSnapshot, hasDynamicReferences, workflowDependencies } from './promote/transform.ts';
 import { diffWorkflows, hashableContent, stableStringify, type ChangeSummary, type Snapshot } from '../shared/diff.ts';
 import { LocalizedError, packError, packMessage, renderError } from '../shared/i18n/index.ts';
 import { t } from '../shared/i18n/server.ts';
@@ -277,7 +278,13 @@ export async function restoreVersion(
   let snapOut = snap;
   let mapped = 0;
   if (inst.id !== v.instance_id) {
+    requirePair(v.instance_id, inst.id);
+    if (hasDynamicReferences(snap)) throw new LocalizedError({ key: 'errors.promote.dynamicReference', params: { name: snap.name } }, 409);
+    for (const ref of workflowDependencies(snap)) {
+      if (!targetWorkflowFor(v.instance_id, inst.id, ref, ref)) throw new LocalizedError({ key: 'errors.promote.dependencyMissing', params: { name: ref } }, 409);
+    }
     const r = transformSnapshot(snap, mappingSetFor(v.instance_id, inst.id), { workflowNames: workflowLabelsFor(v.instance_id, inst.id) });
+    if (r.missing.length) throw new LocalizedError({ key: 'errors.promote.choiceRequired', params: { name: snap.name } }, 409);
     snapOut = r.snapshot;
     mapped = r.applied.length;
   }

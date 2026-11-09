@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
   AlertTriangle, ArrowLeftRight, ArrowRight, CircleCheck, CircleX, FileDiff, Layers, Plus, RefreshCw,
@@ -7,7 +7,7 @@ import {
 import {
   api, useApi, mappingKindLabel,
   type Instance, type DriftRow, type MappingKind, type MappingRow, type MappingSuggestion,
-  type PromoteDiff, type PromoteOutcome, type PromoteOverview,
+  type PromoteDiff, type PromoteOutcome, type PromoteOverview, type EnvironmentPair, type WorkflowChoice, type PromotePlan,
 } from '../api.ts';
 import { ChangeChips } from '../components/changes.tsx';
 import { DiffView } from '../components/DiffView.tsx';
@@ -17,9 +17,10 @@ import {
 import { cx, timeAgo } from '../util.ts';
 import { message, rich, t, type MessageKey } from '../i18n.tsx';
 
-type Filter = 'drifted' | 'only-source' | 'only-target' | 'in-sync' | 'all';
+type Filter = 'drifted' | 'only-source' | 'only-target' | 'in-sync' | 'unpaired' | 'all';
 
 const STATUS: Record<DriftRow['status'], { label: MessageKey; tone: 'add' | 'mod' | 'info' | 'neutral' }> = {
+  unpaired: { label: 'promote.setup.undecided', tone: 'mod' },
   drifted: { label: 'promote.status.drifted', tone: 'mod' },
   'in-sync': { label: 'promote.status.inSync', tone: 'add' },
   'only-source': { label: 'promote.status.onlySource', tone: 'info' },
@@ -31,93 +32,100 @@ export function Promote() {
   const from = params.get('from');
   const to = params.get('to');
   const instances = useApi<Instance[]>('/instances');
-
-  // Erstes Paar vorbelegen: die ersten beiden Instanzen
-  useEffect(() => {
-    if ((from || to) || !instances.data || instances.data.length < 2) return;
-    const p = new URLSearchParams(params);
-    p.set('from', String(instances.data[0]!.id));
-    p.set('to', String(instances.data[1]!.id));
-    setParams(p, { replace: true });
-  }, [instances.data, from, to, params, setParams]);
-
+  const pairs = useApi<EnvironmentPair[]>('/promote/pairs');
   const ready = !!from && !!to && from !== to;
   const ov = useApi<PromoteOverview>(ready ? `/promote/${from}/${to}` : null);
-  const [tab, setTab] = useState<'drift' | 'mappings'>('drift');
-  const [filter, setFilter] = useState<Filter>('drifted');
-
+  const currentPair = useRef(`${from}:${to}`);
+  currentPair.current = `${from}:${to}`;
+  const setOverview = (d: PromoteOverview) => { if (`${d.source.id}:${d.target.id}` === currentPair.current) ov.setData(d); };
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  async function configure() {
+    setBusy(true); setError(undefined);
+    try {
+      setOverview(await api<PromoteOverview>(`/promote/${from}/${to}/pair`, { method: 'PUT' }));
+      void pairs.reload();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
   const swap = () => {
-    if (!from || !to) return;
     const p = new URLSearchParams(params);
-    p.set('from', to);
-    p.set('to', from);
-    setParams(p, { replace: true });
+    if (to) p.set('from', to); else p.delete('from');
+    if (from) p.set('to', from); else p.delete('to');
+    setParams(p);
   };
-
-  const rows = useMemo(() => {
-    if (!ov.data) return [];
-    return filter === 'all' ? ov.data.drift.rows : ov.data.drift.rows.filter((r) => r.status === filter);
-  }, [ov.data, filter]);
-  const allRows = ov.data?.drift.rows ?? [];
-
   if (instances.loading && !instances.data) return <PageLoader />;
   if (instances.error) return <ErrorBox>{instances.error}</ErrorBox>;
-  if ((instances.data?.length ?? 0) < 2) {
-    return (
-      <>
-        <PageHeader title={t('nav.environments')} subtitle={t('promote.subtitleShort')} />
-        <Card>
-          <EmptyState icon={<Layers className="size-6" />} title={t('promote.needTwoTitle')}>
-            {t('promote.needTwoText')}
-            <div className="mt-6"><Link to="/instances" className="text-sm text-accent-hi hover:underline">{t('promote.connectLink')}</Link></div>
-          </EmptyState>
-        </Card>
-      </>
-    );
-  }
-  if (ov.error) return <ErrorBox>{ov.error}</ErrorBox>;
-  if (!ov.data) return <PageLoader />;
-
-  return (
-    <>
-      <PageHeader
-        title={t('nav.environments')}
-        subtitle={t('promote.subtitle')}
-      />
-
-      {/* Instanz-Paar */}
-      <Card className="mb-6 p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
-          <PairSelect label={t('promote.source')} which="from" value={from} instances={instances.data!} />
-          <Button
-            variant="ghost"
-            className="self-center"
-            title={t('promote.swapTitle')}
-            icon={<ArrowLeftRight className="size-4" />}
-            onClick={swap}
-          />
-          <PairSelect label={t('promote.target')} which="to" value={to} instances={instances.data!} />
-        </div>
-      </Card>
-
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: 'drift', label: <span className="flex items-center gap-2">{t('promote.tabDrift')} {ov.data.drift.counts.drifted > 0 && <Badge tone="mod">{ov.data.drift.counts.drifted}</Badge>}</span> },
-          { value: 'mappings', label: <span className="flex items-center gap-2">{t('promote.tabMappings')} <Badge>{ov.data.mappings.length}</Badge></span> },
-        ]}
-      />
-
-      <div className="mt-6">
-        {tab === 'drift' ? (
-          <DriftTab data={ov.data} rows={rows} filter={filter} setFilter={setFilter} reload={ov.reload} setData={ov.setData} />
-        ) : (
-          <MappingsTab data={ov.data} setData={ov.setData} />
-        )}
+  if ((instances.data?.length ?? 0) < 2) return <Card><EmptyState icon={<Layers className="size-6" />} title={t('promote.needTwoTitle')}>
+    {t('promote.needTwoText')} <Link to="/instances">{t('promote.connectLink')}</Link>
+  </EmptyState></Card>;
+  const data = ready && ov.data?.source.id === Number(from) && ov.data.target.id === Number(to) ? ov.data : undefined;
+  return <>
+    <PageHeader title={t('nav.environments')} subtitle={t('promote.subtitle')} />
+    <Card className="mb-6 space-y-4 p-4">
+      <div className="font-medium">{t('promote.setup.setupTitle')}</div>
+      <p className="text-sm text-muted">{t('promote.setup.setupText')}</p>
+      {!!pairs.data?.length && <Field label={t('promote.setup.savedPairs')}><select className={inputCls} value={pairs.data.some((p) => String(p.sourceId) === from && String(p.targetId) === to) ? `${from}:${to}` : ''} onChange={(e) => {
+        const [f, target] = e.target.value.split(':');
+        if (f && target) setParams({ from: f, to: target });
+      }}><option value="">{t('promote.mappings.choose')}</option>{pairs.data.map((p) => <option key={`${p.sourceId}:${p.targetId}`} value={`${p.sourceId}:${p.targetId}`}>{p.sourceName} → {p.targetName}</option>)}</select></Field>}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <PairSelect label={t('promote.source')} which="from" value={from} instances={instances.data!} />
+        <Button variant="ghost" title={t('promote.swapTitle')} icon={<ArrowLeftRight className="size-4" />} onClick={swap} />
+        <PairSelect label={t('promote.target')} which="to" value={to} instances={instances.data!} />
       </div>
-    </>
-  );
+      {from && to && from === to && <ErrorBox>{t('promote.setup.samePair')}</ErrorBox>}
+      {data && !data.configured && <Button loading={busy} onClick={() => void configure()}>{t('promote.setup.savePair')}</Button>}
+      {data?.configured && <Badge tone="add">{t('promote.setup.configured')}: {data.source.name} → {data.target.name}</Badge>}
+      {(error || (ready && ov.error) || pairs.error) && <ErrorBox>{error || ov.error || pairs.error}</ErrorBox>}
+    </Card>
+    {ready && ov.loading && !data && <PageLoader />}
+    {data?.configured && <ConfiguredPair key={`${from}:${to}`} data={data} setData={setOverview} reload={ov.reload} />}
+  </>;
+}
+
+function ConfiguredPair({ data, setData, reload }: { data: PromoteOverview; setData: (d: PromoteOverview) => void; reload: () => void }) {
+  const [tab, setTab] = useState<'workflows' | 'mappings' | 'drift'>('workflows');
+  const [filter, setFilter] = useState<Filter>('all');
+  const rows = useMemo(() => filter === 'all' ? data.drift.rows : data.drift.rows.filter((r) => r.status === filter), [data, filter]);
+  return <>
+    <Tabs value={tab} onChange={setTab} tabs={[
+      { value: 'workflows', label: t('promote.setup.workflowTab') },
+      { value: 'mappings', label: t('promote.setup.dependenciesTab') },
+      { value: 'drift', label: t('promote.setup.reviewTab') },
+    ]} />
+    <div className="mt-6">
+      {tab === 'workflows' && <><WorkflowPairs data={data} setData={setData} /><Button className="mt-4" onClick={() => setTab('mappings')}>{t('promote.setup.continueDependencies')}</Button></>}
+      {tab === 'mappings' && <><MappingsTab data={data} setData={setData} /><Button className="mt-4" onClick={() => setTab('drift')}>{t('promote.setup.continueReview')}</Button></>}
+      {tab === 'drift' && <DriftTab data={data} rows={rows} filter={filter} setFilter={setFilter} reload={reload} setData={setData} />}
+    </div>
+  </>;
+}
+
+function WorkflowPairs({ data, setData }: { data: PromoteOverview; setData: (d: PromoteOverview) => void }) {
+  return <><p className="mb-4 text-sm text-muted">{t('promote.setup.workflowText')}</p>
+    <Card className="divide-y divide-line">{data.choices.sources.map((choice) => <WorkflowPairRow key={`${choice.n8nId}:${choice.decision}:${choice.targetId}`} choice={choice} data={data} setData={setData} />)}</Card></>;
+}
+function WorkflowPairRow({ choice, data, setData }: { choice: WorkflowChoice; data: PromoteOverview; setData: (d: PromoteOverview) => void }) {
+  const initial = choice.decision === 'create' ? '__create' : choice.targetId ?? choice.suggestion ?? '';
+  const [value, setValue] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const confirmed = choice.valid && ((choice.decision === 'create' && value === '__create') || (choice.decision === 'existing' && choice.targetId === value));
+  return <div className="space-y-2 p-4"><div className="flex flex-wrap items-center gap-3">
+    <span className="min-w-0 flex-1 text-sm">{choice.name}</span>
+    <Badge tone={confirmed ? 'add' : 'mod'}>{t(confirmed ? 'promote.setup.confirmedChoice' : 'promote.setup.undecided')}</Badge>
+    <select aria-label={`${t('promote.target')}: ${choice.name}`} className={cx(inputCls, 'w-72')} value={value} onChange={(e) => setValue(e.target.value)}>
+      <option value="">{t('promote.mappings.choose')}</option><option value="__create">{t('promote.setup.createChoice')}</option>
+      {data.choices.targets.map((target) => <option key={target.n8nId} value={target.n8nId}>{target.name} · {target.n8nId}</option>)}
+    </select>
+    <Button disabled={!value || confirmed} loading={busy} onClick={async () => {
+      setBusy(true); setError(undefined);
+      try { setData(await api<PromoteOverview>(`/promote/${data.source.id}/${data.target.id}/workflows`, { method: 'PUT', body: { from: choice.n8nId, to: value === '__create' ? null : value } })); }
+      catch (e) { setError((e as Error).message); }
+      finally { setBusy(false); }
+    }}>{t('promote.setup.confirmChoice')}</Button>
+  </div>{!choice.valid && <ErrorBox>{t('errors.promote.targetMissing')}</ErrorBox>}{error && <ErrorBox>{error}</ErrorBox>}</div>;
 }
 
 // ───────────────────────── Instanz-Paar ─────────────────────────
@@ -136,6 +144,7 @@ function PairSelect({ label, which, value, instances }: { label: string; which: 
           setParams(p, { replace: true });
         }}
       >
+        <option value="">{t('promote.setup.chooseInstance')}</option>
         {instances.map((i) => (
           <option key={i.id} value={i.id}>
             {i.name} · {t('dashboard.workflowCount', { count: i.workflows })}
@@ -157,20 +166,22 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
   setData: (d: PromoteOverview) => void;
 }) {
   const c = data.drift.counts;
-  const pending = data.drift.rows.filter((r) => r.status === 'drifted' || r.status === 'only-source');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const pending = data.drift.rows.filter((r) => r.source && selected.has(r.source.workflowId) && (r.status === 'drifted' || r.status === 'only-source'));
+  const canTransfer = (row: DriftRow) => data.choices.sources.some((c) => c.id === row.source?.workflowId && c.decision && c.valid);
   const [confirm, setConfirm] = useState<DriftRow[] | null>(null);
   const [results, setResults] = useState<PromoteOutcome[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [diffFor, setDiffFor] = useState<DriftRow | null>(null);
 
-  async function promote(rowsToPromote: DriftRow[]) {
+  async function promote(rowsToPromote: DriftRow[], fingerprint: string) {
     setBusy(true);
     setError(undefined);
     try {
       const ids = rowsToPromote.filter((r) => r.source).map((r) => r.source!.workflowId);
       const r = await api<{ results: PromoteOutcome[]; overview: PromoteOverview }>(`/promote/${data.source.id}/${data.target.id}/promote`, {
-        body: { workflowIds: ids },
+        body: { workflowIds: ids, fingerprint },
       });
       setData(r.overview);
       setResults(r.results);
@@ -182,12 +193,12 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
     }
   }
 
-  const promoteAllRow = pending.length > 1 && (
+  const promoteAllRow = pending.length > 0 && (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div className="text-sm text-muted">
         {t('promote.summary', { drifted: c.drifted, onlySource: c.onlySource, inSync: c.inSync })}
       </div>
-      <Button size="sm" icon={<Upload className="size-4" />} onClick={() => setConfirm(pending)}>{t('promote.promoteAll')}</Button>
+      <Button size="sm" icon={<Upload className="size-4" />} onClick={() => setConfirm(pending)}>{t('promote.setup.reviewSelection')}</Button>
     </div>
   );
 
@@ -197,6 +208,7 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
         value={filter}
         onChange={setFilter}
         options={[
+          { value: 'unpaired', label: `${t('promote.setup.undecided')} ${c.unpaired}` },
           { value: 'drifted', label: t('promote.filter.drifted', { count: c.drifted }) },
           { value: 'only-source', label: t('promote.filter.onlySource', { count: c.onlySource }) },
           { value: 'only-target', label: t('promote.filter.onlyTarget', { count: c.onlyTarget }) },
@@ -211,12 +223,10 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
         <Card>
           <EmptyState
             icon={<CircleCheck className="size-6" />}
-            title={t(filter === 'drifted' ? 'promote.empty.noDrift' : 'promote.empty.nothing')}
+            title={t('promote.empty.nothing')}
             action={<Button size="sm" variant="ghost" icon={<RefreshCw className="size-4" />} onClick={() => void reload()}>{t('promote.empty.reload')}</Button>}
           >
-            {filter === 'drifted'
-              ? t('promote.empty.noDriftText', { target: data.target.name, source: data.source.name })
-              : t('promote.empty.noneInSelection')}
+            {t('promote.empty.noneInSelection')}
           </EmptyState>
         </Card>
       ) : (
@@ -225,6 +235,9 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
             <DriftRowView
               key={(row.source ?? row.target)!.workflowId}
               row={row}
+              eligible={canTransfer(row)}
+              selected={!!row.source && selected.has(row.source.workflowId)}
+              onSelect={() => { if (row.source) setSelected((old) => { const next = new Set(old); if (next.has(row.source!.workflowId)) next.delete(row.source!.workflowId); else next.add(row.source!.workflowId); return next; }); }}
               sourceName={data.source.name}
               targetName={data.target.name}
               onDiff={() => setDiffFor(row)}
@@ -242,18 +255,22 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
           busy={busy}
           error={error}
           onClose={() => setConfirm(null)}
-          onGo={() => void promote(confirm)}
+          sourceId={data.source.id}
+          targetId={data.target.id}
+          onReload={() => setError(undefined)}
+          onGo={(fingerprint) => void promote(confirm, fingerprint)}
         />
       )}
 
       {results && <ResultsModal results={results} targetName={data.target.name} onClose={() => setResults(null)} onDone={reload} />}
-      {diffFor && <DiffModal row={diffFor} sourceId={data.source.id} targetId={data.target.id} onClose={() => setDiffFor(null)} />}
+      {diffFor && <DiffModal workflowId={diffFor.source!.workflowId} name={diffFor.source!.name} sourceId={data.source.id} targetId={data.target.id} onClose={() => setDiffFor(null)} />}
     </>
   );
 }
 
-function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
+function DriftRowView({ row, sourceName, targetName, onDiff, onPromote, eligible, selected, onSelect }: {
   row: DriftRow;
+  eligible: boolean; selected: boolean; onSelect: () => void;
   sourceName: string;
   targetName: string;
   onDiff: () => void;
@@ -273,6 +290,7 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
   const name = row.source?.name ?? row.target!.name;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+      {eligible && (row.status === 'drifted' || row.status === 'only-source') && <input type="checkbox" aria-label={`${t('promote.setup.selectWorkflow')}: ${name}`} checked={selected} onChange={onSelect} />}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate text-sm font-medium">{name}</span>
@@ -311,7 +329,7 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
         {(row.status === 'drifted' || row.status === 'only-source') && (
           <>
             <Button size="sm" variant="ghost" icon={<FileDiff className="size-4" />} onClick={onDiff} title={t('promote.row.diffTitle')}>{t('promote.row.diff')}</Button>
-            <Button size="sm" variant="primary" icon={<Upload className="size-4" />} onClick={onPromote}>
+            <Button size="sm" variant="primary" disabled={!eligible} icon={<Upload className="size-4" />} onClick={onPromote}>
               {t(row.status === 'drifted' ? 'promote.row.apply' : 'promote.row.create')}
             </Button>
           </>
@@ -326,53 +344,43 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
   );
 }
 
-function ConfirmPromoteModal({ rows, sourceName, targetName, busy, error, onClose, onGo }: {
-  rows: DriftRow[];
-  sourceName: string;
-  targetName: string;
-  busy: boolean;
-  error?: string;
-  onClose: () => void;
-  onGo: () => void;
+function ConfirmPromoteModal({ rows, sourceName, targetName, sourceId, targetId, busy, error, onClose, onGo, onReload }: {
+  rows: DriftRow[]; sourceName: string; targetName: string; sourceId: number; targetId: number;
+  busy: boolean; error?: string; onClose: () => void; onGo: (fingerprint: string) => void; onReload: () => void;
 }) {
-  const missing = [...new Set(rows.flatMap((r) => r.missing))];
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={t('promote.confirm.title', { count: rows.length, name: rows[0]!.source?.name ?? rows[0]!.target?.name ?? '' })}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button variant="primary" loading={busy} onClick={onGo}>{t('promote.confirm.go', { target: targetName })}</Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <div className="text-sm text-muted">
-          {rich('promote.confirm.text', { b: (c) => <b className="text-text">{c}</b> }, { source: sourceName, target: targetName })}
-        </div>
-        {rows.length > 1 && (
-          <div className="max-h-48 overflow-y-auto rounded-lg border border-line bg-sidebar px-3 py-2 text-[13px]">
-            {rows.map((r) => (
-              <div key={(r.source ?? r.target)!.workflowId} className="flex items-center justify-between gap-3 py-0.5">
-                <span className="truncate">{r.source!.name}</span>
-                <span className="shrink-0 text-xs text-dim">{t(r.target ? 'promote.confirm.overwrite' : 'promote.confirm.createNew')}</span>
-              </div>
-            ))}
+  const [plan, setPlan] = useState<PromotePlan>();
+  const [loadError, setLoadError] = useState<string>();
+  const [revision, setRevision] = useState(0);
+  const [diffRow, setDiffRow] = useState<{ workflowId: number; name: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setPlan(undefined); setLoadError(undefined);
+    api<PromotePlan>(`/promote/${sourceId}/${targetId}/plan`, { body: { workflowIds: rows.filter((r) => r.source).map((r) => r.source!.workflowId) } })
+      .then((p) => { if (alive) setPlan(p); }).catch((e) => { if (alive) setLoadError((e as Error).message); });
+    return () => { alive = false; };
+  }, [rows, sourceId, targetId, revision]);
+  return <><Modal open onClose={onClose} title={t('promote.setup.reviewTitle')} footer={<>
+    <Button variant="ghost" disabled={busy} onClick={onClose}>{t('common.cancel')}</Button>
+    <Button variant="primary" loading={busy} disabled={!plan || !!plan.blockers.length || !!error} onClick={() => plan && onGo(plan.fingerprint)}>{t('promote.confirm.go', { target: targetName })}</Button>
+  </>}>
+    <div className="space-y-3">
+      <p className="text-sm">{rich('promote.confirm.text', { b: (c) => <b>{c}</b> }, { source: sourceName, target: targetName })}</p>
+      {!plan && !loadError && <p>{t('promote.setup.reviewLoading')}</p>}
+      {plan && <>
+        <p className="text-sm">{t(plan.blockers.length ? 'promote.setup.reviewBlocked' : 'promote.setup.reviewReady')}</p>
+        {plan.blockers.map((m) => <ErrorBox key={m}>{message(m)}</ErrorBox>)}
+        <div className="space-y-2">{plan.items.map((item) => <div key={item.workflowId} className="rounded-lg border border-line p-3 text-sm">
+          <div>{item.name} · v{item.version} → {item.targetName ?? targetName}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2"><Badge>{t(item.action === 'created' ? 'promote.confirm.createNew' : 'promote.confirm.overwrite')}</Badge>
+            {item.dependency && <Badge tone="info">{t('promote.setup.includedDependency')}</Badge>}
+            <Button size="sm" variant="ghost" onClick={() => setDiffRow({ workflowId: item.workflowId, name: item.name })}>{t('promote.row.diff')}</Button>
           </div>
-        )}
-        {missing.length > 0 && (
-          <div className="space-y-1 rounded-lg border border-mod/25 bg-mod/8 px-3 py-2 text-xs text-mod">
-            <div className="flex items-center gap-1.5 font-medium"><AlertTriangle className="size-3.5" />{t('promote.confirm.unmappedTitle')}</div>
-            {missing.slice(0, 5).map((m) => <div key={m} className="truncate">{message(m)}</div>)}
-            {missing.length > 5 && <div>{t('promote.confirm.more', { count: missing.length - 5 })}</div>}
-          </div>
-        )}
-        {error && <ErrorBox>{error}</ErrorBox>}
-      </div>
-    </Modal>
-  );
+        </div>)}</div>
+      </>}
+      {(loadError || error) && <ErrorBox>{loadError || error}</ErrorBox>}
+      <Button disabled={busy} onClick={() => { onReload(); setRevision((n) => n + 1); }}>{t('promote.setup.retryReview')}</Button>
+    </div>
+  </Modal>{diffRow && <DiffModal workflowId={diffRow.workflowId} name={diffRow.name} sourceId={sourceId} targetId={targetId} onClose={() => setDiffRow(null)} />}</>;
 }
 
 function ResultsModal({ results, targetName, onClose, onDone }: {
@@ -416,21 +424,21 @@ function ResultsModal({ results, targetName, onClose, onDone }: {
   );
 }
 
-function DiffModal({ row, sourceId, targetId, onClose }: { row: DriftRow; sourceId: number; targetId: number; onClose: () => void }) {
+function DiffModal({ workflowId, name, sourceId, targetId, onClose }: { workflowId: number; name: string; sourceId: number; targetId: number; onClose: () => void }) {
   const [state, setState] = useState<{ loading: boolean; error?: string; data?: PromoteDiff }>({ loading: true });
 
   useEffect(() => {
     let alive = true;
-    api<PromoteDiff>(`/promote/${sourceId}/${targetId}/diff/${row.source!.workflowId}`)
+    api<PromoteDiff>(`/promote/${sourceId}/${targetId}/diff/${workflowId}`)
       .then((data) => alive && setState({ loading: false, data }))
       .catch((e) => alive && setState({ loading: false, error: (e as Error).message }));
     return () => {
       alive = false;
     };
-  }, [row, sourceId, targetId]);
+  }, [workflowId, sourceId, targetId]);
 
   return (
-    <Modal open onClose={onClose} title={t('promote.diffModal.title', { name: row.source!.name })} width="max-w-6xl">
+    <Modal open onClose={onClose} title={t('promote.diffModal.title', { name })} width="max-w-6xl">
       {state.loading && <PageLoader />}
       {state.error && <ErrorBox>{state.error}</ErrorBox>}
       {state.data && (

@@ -13,7 +13,7 @@ import { N8nClient } from '../n8n.ts';
 import type { InstanceRow, WorkflowRow } from '../sync.ts';
 import type { Snapshot } from '../../shared/diff.ts';
 import type { Translator } from '../../shared/i18n/index.ts';
-import { emptyMappingSet, type MappingKind, type MappingSet } from './transform.ts';
+import { emptyMappingSet, workflowDependencies, type MappingKind, type MappingSet } from './transform.ts';
 
 export const MAPPING_KINDS: MappingKind[] = ['credential', 'workflow', 'webhookPath', 'dataTable'];
 
@@ -167,7 +167,10 @@ export function dataTableValues(snaps: Snapshot[]): string[] {
     if (Array.isArray(value)) return value.forEach(walk);
     if (!value || typeof value !== 'object') return;
     for (const [k, v] of Object.entries(value)) {
-      if (k === 'dataTableId' && typeof v === 'string' && v) out.add(v);
+      if (k === 'dataTableId') {
+        const id = v && typeof v === 'object' && 'value' in v ? (v as { value: unknown }).value : v;
+        if (typeof id === 'string' && id && !id.startsWith('=')) out.add(id);
+      }
       else walk(v);
     }
   };
@@ -192,17 +195,7 @@ export function webhookPaths(snaps: Snapshot[]): string[] {
 
 /** Referenzierte Workflow-IDs: Execute-Workflow-Nodes und Error-Workflow-Settings. */
 export function referencedWorkflowIds(snaps: Snapshot[]): Set<string> {
-  const out = new Set<string>();
-  for (const s of snaps) {
-    for (const n of s.nodes ?? []) {
-      if (!/executeWorkflow/i.test(n.type ?? '')) continue;
-      const p = (n.parameters ?? {}) as Record<string, unknown>;
-      if (typeof p.workflowId === 'string' && p.workflowId && !p.workflowId.startsWith('=')) out.add(p.workflowId);
-    }
-    const ew = s.settings?.['errorWorkflow'];
-    if (typeof ew === 'string' && ew && !ew.startsWith('=')) out.add(ew);
-  }
-  return out;
+  return new Set(snaps.flatMap(workflowDependencies));
 }
 
 // ───────────────────────── Workflow-Paarung ─────────────────────────
@@ -213,28 +206,19 @@ export interface TargetMatch {
 }
 
 /**
- * Findet den Ziel-Workflow auf der Ziel-Instanz: erst die gespeicherte Zuordnung,
- * dann die gleiche n8n-ID (bei geklonten Instanzen), dann ein eindeutiger Name.
+ * Findet den Ziel-Workflow auf der Ziel-Instanz: ausschließlich die bestätigte Zuordnung.
+ * Gleiche IDs und Namen dienen nur als Vorschläge, niemals als Schreibfreigabe.
  */
 export function targetWorkflowFor(sourceInstanceId: number, targetInstanceId: number, sourceN8nId: string, sourceName: string): TargetMatch | null {
   const byMapping = db
     .prepare('SELECT to_value FROM env_mappings WHERE source_id = ? AND target_id = ? AND kind = ? AND from_value = ?')
     .get(sourceInstanceId, targetInstanceId, 'workflow', sourceN8nId) as { to_value: string } | undefined;
-  const byId = db
-    .prepare('SELECT * FROM workflows WHERE instance_id = ? AND n8n_id = ? AND deleted_at IS NULL')
-    .get(targetInstanceId, sourceN8nId) as unknown as WorkflowRow | undefined;
-  if (byId) return { row: byId, matchedBy: byMapping?.to_value === sourceN8nId ? 'mapping' : 'id' };
   if (byMapping) {
     const mapped = db
       .prepare('SELECT * FROM workflows WHERE instance_id = ? AND n8n_id = ? AND deleted_at IS NULL')
       .get(targetInstanceId, byMapping.to_value) as unknown as WorkflowRow | undefined;
-    // Gemappter Workflow existiert nicht mehr auf dem Ziel → neu anlegen (Zuordnung wird dann erneuert)
     if (mapped) return { row: mapped, matchedBy: 'mapping' };
   }
-  const byName = db
-    .prepare('SELECT * FROM workflows WHERE instance_id = ? AND name = ? AND deleted_at IS NULL')
-    .all(targetInstanceId, sourceName) as unknown as WorkflowRow[];
-  if (byName.length === 1) return { row: byName[0], matchedBy: 'name' };
   return null;
 }
 
@@ -305,14 +289,16 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow, 
   }
 
   for (const [id, ref] of credentialRefs(sourceLatest.map((w) => w.snap))) {
-    if (existing.has(`credential:${id}`) || targetCreds.has(id)) continue;
-    const candidates = [...targetCreds.values()].sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    if (existing.has(`credential:${id}`)) continue;
+    const candidates = [...targetCreds.values()].filter((c) => c.type === ref.type).sort((a, b) => a.name.localeCompare(b.name, 'de'));
     const ci = (s: string) => s.trim().toLowerCase();
-    let match = candidates.find((c) => ci(c.name) === ci(ref.name));
+    const sameName = candidates.filter((c) => ci(c.name) === ci(ref.name));
+    let match = sameName.length === 1 ? sameName[0] : undefined;
     let reason = tr('suggestReason.sameName');
     if (!match) {
       const norm = normalizeEnvName(ref.name);
-      match = candidates.find((c) => normalizeEnvName(c.name) === norm);
+      const normalized = candidates.filter((c) => normalizeEnvName(c.name) === norm);
+      match = normalized.length === 1 ? normalized[0] : undefined;
       reason = tr('suggestReason.nameWithoutEnv');
     }
     if (!match) {
@@ -336,17 +322,17 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow, 
   // ── Sub-Workflows & Error-Workflows ──
   const sourceNames = workflowNamesFor(source.id);
   const targetWorkflows = db
-    .prepare('SELECT n8n_id, name FROM workflows WHERE instance_id = ? AND deleted_at IS NULL ORDER BY name COLLATE NOCASE LIMIT 100')
+    .prepare('SELECT n8n_id, name FROM workflows WHERE instance_id = ? AND deleted_at IS NULL ORDER BY name COLLATE NOCASE')
     .all(target.id) as { n8n_id: string; name: string }[];
-  const targetByName = new Map(targetWorkflows.map((w) => [w.name, w]));
+  const targetByName = (name: string) => { const matches = targetWorkflows.filter((w) => w.name === name); return matches.length === 1 ? matches[0] : undefined; };
   for (const id of referencedWorkflowIds(sourceLatest.map((w) => w.snap))) {
     if (existing.has(`workflow:${id}`)) continue;
     const byId = db
       .prepare('SELECT n8n_id, name FROM workflows WHERE instance_id = ? AND n8n_id = ? AND deleted_at IS NULL')
       .get(target.id, id) as { n8n_id: string; name: string } | undefined;
-    if (byId) continue; // gleiche ID auf beiden Seiten – braucht keine Zuordnung
+    // Identische IDs sind ebenfalls nur Vorschläge.
     const name = sourceNames.get(id) ?? null;
-    const match = name ? targetByName.get(name) : undefined;
+    const match = byId ?? (name ? targetByName(name) : undefined);
     out.push({
       kind: 'workflow',
       from: id,
@@ -377,7 +363,7 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow, 
   const targetTables = dataTableValues(targetLatest.map((w) => w.snap));
   const sourceTables = dataTableValues(sourceLatest.map((w) => w.snap)).filter((t) => !existing.has(`dataTable:${t}`));
   for (const table of sourceTables) {
-    if (targetTables.includes(table)) continue; // gleicher Bezeichner braucht keine Zuordnung
+    // Auch identische Tabellen-IDs müssen bewusst bestätigt werden.
     const auto = targetTables.length === 1 && sourceTables.length === 1 ? targetTables[0] : null;
     out.push({
       kind: 'dataTable',

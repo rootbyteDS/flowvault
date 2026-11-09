@@ -86,6 +86,18 @@ export const errors: Messages['errors'] = {
     coreStatus: 'Core responded with HTTP {status}',
   },
   promote: {
+    pairRequired: 'Set up this instance pair for this direction first',
+    choiceRequired: 'Map workflow “{name}” to a target or confirm creation first',
+    targetMissing: 'The mapped target workflow is missing – review the pairing',
+    targetUsed: 'This target workflow is already mapped to another source workflow',
+    dependencyMissing: 'Map dependency “{name}” or confirm creation first',
+    cycle: 'Cyclic new dependency at “{name}” – create and map target workflows separately first',
+    dynamicReference: '“{name}” contains dynamic workflow/data-table references – use static mappings for a verified transfer',
+    stalePlan: 'The transfer inputs have changed. Reload the transfer review',
+    busy: 'A transfer to this target instance is already running',
+    batchStopped: 'Skipped because a previous transfer failed',
+    verificationFailed: 'The saved target workflow differs from the planned content. Review the result',
+
     sameInstance: 'Source and target must be different instances',
     notInSource: 'The workflow does not belong to the source instance',
     noVersion: 'No saved version',
