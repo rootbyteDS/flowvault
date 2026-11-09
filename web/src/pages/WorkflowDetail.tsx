@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   Check, Copy, Download, Loader2, PenLine, ExternalLink, GitCompare, MessageSquare, Pencil, RefreshCw, RotateCcw, Trash2, X,
 } from 'lucide-react';
-import { describeSummary, stableStringify } from '../../../shared/diff.ts';
+import { stableStringify } from '../../../shared/diff.ts';
 import { api, useApi, type AiSettings, type CompareResult, type FailingNode, type VersionHealth, type WorkflowDetail as WD, type WorkflowHealth } from '../api.ts';
 import { AlertBanner, HealthPill, VersionHealthPanel } from '../components/health.tsx';
 import { ChangeChips } from '../components/changes.tsx';
@@ -12,7 +12,8 @@ import { RestoreModal } from '../components/RestoreModal.tsx';
 import { WorkflowCanvas, canvasFromSnapshot } from '../components/WorkflowCanvas.tsx';
 import { nodeVisual } from '../components/changes.tsx';
 import { Button, Card, ErrorBox, Modal, PageHeader, PageLoader, Status, Tabs, inputCls, useToast } from '../components/ui.tsx';
-import { cx, formatBytes, formatDate, n8nWorkflowUrl, shortType, timeAgo, versionTitle } from '../util.ts';
+import { cx, describeSummary, formatBytes, formatDate, n8nWorkflowUrl, shortType, timeAgo, versionTitle } from '../util.ts';
+import { message, t } from '../i18n.tsx';
 
 type Tab = 'changes' | 'canvas' | 'json';
 
@@ -43,8 +44,8 @@ export function WorkflowDetail() {
     setRefreshing(true);
     try {
       const r = await api<{ ok: boolean; changed?: boolean; error?: string }>(`/workflows/${id}/refresh`, { method: 'POST' });
-      if (!r.ok) toast(r.error ?? 'Fehler', 'error');
-      else toast(r.changed ? 'Neue Version gesichert' : 'Keine Änderungen seit der letzten Sicherung');
+      if (!r.ok) toast(r.error ?? t('errors.http.generic'), 'error');
+      else toast(t(r.changed ? 'workflow.newVersion' : 'workflow.noChangesSince'));
       const d = await wf.reload();
       health.reload();
       if (r.changed && d) setParams({ v: String(d.versions[0].id) }, { replace: true });
@@ -72,31 +73,31 @@ export function WorkflowDetail() {
         title={
           <span className="flex flex-wrap items-center gap-3">
             {w.name}
-            {w.deleted_at ? <Status tone="del">In n8n gelöscht</Status> : w.archived ? <Status tone="neutral">Archiviert</Status> : w.active ? <Status tone="add">Aktiv</Status> : <Status tone="neutral">Inaktiv</Status>}
+            {w.deleted_at ? <Status tone="del">{t('workflow.deletedInN8n')}</Status> : w.archived ? <Status tone="neutral">{t('workflows.status.archived')}</Status> : w.active ? <Status tone="add">{t('workflows.status.active')}</Status> : <Status tone="neutral">{t('workflows.status.inactive')}</Status>}
           </span>
         }
         subtitle={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>{w.node_count} Nodes</span>
-            <span>{w.version_count} Versionen</span>
-            <span>Zuerst gesichert {formatDate(w.first_seen_at)}</span>
-            {w.tags.length > 0 && <span className="font-mono text-xs text-dim">{w.tags.map((t) => `#${t}`).join(' ')}</span>}
+            <span>{t('workflow.nodes', { count: w.node_count })}</span>
+            <span>{t('dashboard.versionCount', { count: w.version_count })}</span>
+            <span>{t('workflow.firstBackedUp', { date: formatDate(w.first_seen_at) })}</span>
+            {w.tags.length > 0 && <span className="font-mono text-xs text-dim">{w.tags.map((tag) => `#${tag}`).join(' ')}</span>}
           </span>
         }
         actions={
           <>
             {!w.deleted_at && (
               <Button variant="ghost" icon={<ExternalLink className="size-4" />} onClick={() => window.open(n8nWorkflowUrl(w.base_url, w.n8n_id), '_blank', 'noopener')}>
-                In n8n öffnen
+                {t('workflow.openInN8n')}
               </Button>
             )}
             {w.deleted_at ? (
-              <Button variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setForgetOpen(true)}>Historie löschen</Button>
+              <Button variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setForgetOpen(true)}>{t('workflow.forgetHistory')}</Button>
             ) : (
-              <Button icon={<RefreshCw className={cx('size-4', refreshing && 'animate-spin')} />} onClick={refresh} disabled={refreshing}>Jetzt prüfen</Button>
+              <Button icon={<RefreshCw className={cx('size-4', refreshing && 'animate-spin')} />} onClick={refresh} disabled={refreshing}>{t('workflow.checkNow')}</Button>
             )}
             {versions.length > 1 && (
-              <Button icon={<GitCompare className="size-4" />} onClick={() => nav(`/compare?workflow=${w.id}&from=${versions[versions.length - 1].id}&to=${versions[0].id}`)}>Vergleichen</Button>
+              <Button icon={<GitCompare className="size-4" />} onClick={() => nav(`/compare?workflow=${w.id}&from=${versions[versions.length - 1].id}&to=${versions[0].id}`)}>{t('workflow.compare')}</Button>
             )}
           </>
         }
@@ -116,8 +117,8 @@ export function WorkflowDetail() {
         {/* ───── Versions-Timeline ───── */}
         <Card className="h-fit lg:sticky lg:top-0">
           <div className="flex items-baseline justify-between border-b border-line px-4 py-3">
-            <h2 className="text-sm font-medium">Verlauf</h2>
-            <span className="font-mono text-xs text-dim">{versions.length} Versionen</span>
+            <h2 className="text-sm font-medium">{t('workflow.timeline')}</h2>
+            <span className="font-mono text-xs text-dim">{t('dashboard.versionCount', { count: versions.length })}</span>
           </div>
           <div className="max-h-[calc(100vh-220px)] overflow-y-auto py-2">
             {versions.map((v, i) => {
@@ -141,14 +142,14 @@ export function WorkflowDetail() {
                     <div className="flex items-baseline gap-2 font-mono text-xs">
                       <span className={active ? 'text-text' : 'text-muted'}>v{v.number}</span>
                       <span className="text-dim">#{v.hash.slice(0, 7)}</span>
-                      {i === 0 && !w.deleted_at && <span className="text-accent-hi">aktuell</span>}
+                      {i === 0 && !w.deleted_at && <span className="text-accent-hi">{t('workflow.current')}</span>}
                       <span className="ml-auto shrink-0 font-sans text-dim">{timeAgo(v.created_at)}</span>
                     </div>
                     <div className={cx('mt-1 line-clamp-2 text-[13px]', active ? 'text-text' : 'text-muted')}>
-                      {v.message || versionTitle(v)}
+                      {message(v.message) || versionTitle(v)}
                     </div>
                     {v.message && <div className="mt-0.5 truncate text-xs text-dim">{versionTitle(v)}</div>}
-                    {v.ai_status === 'pending' && <div className="mt-0.5 text-xs text-dim">Text wird erzeugt</div>}
+                    {v.ai_status === 'pending' && <div className="mt-0.5 text-xs text-dim">{t('workflow.generating')}</div>}
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1"><ChangeChips s={v.summary} /><HealthPill h={healthByVersion.get(v.id)} minRuns={health.data?.settings.minRuns} /></div>
                   </div>
                 </button>
@@ -179,9 +180,9 @@ export function WorkflowDetail() {
             value={tab}
             onChange={setTab}
             tabs={[
-              { value: 'changes', label: prev ? `Änderungen zu v${prev.number}` : 'Änderungen' },
-              { value: 'canvas', label: 'Workflow' },
-              { value: 'json', label: 'JSON' },
+              { value: 'changes', label: prev ? t('workflow.tabChangesTo', { number: prev.number }) : t('workflow.tabChanges') },
+              { value: 'canvas', label: t('workflow.tabWorkflow') },
+              { value: 'json', label: t('workflow.tabJson') },
             ]}
           />
           <div className="mt-6">
@@ -193,7 +194,7 @@ export function WorkflowDetail() {
                 <DiffView from={cmp.data.from.snapshot} to={cmp.data.to.snapshot} diff={cmp.data.diff} failing={selHealth?.failingNodes} />
               ) : (
                 <div className="space-y-4">
-                  <p className="text-sm text-muted">Erste gesicherte Version, es gibt noch nichts zum Vergleichen</p>
+                  <p className="text-sm text-muted">{t('workflow.firstVersion')}</p>
                   <CanvasInspector result={cmp.data} failing={selHealth?.failingNodes} />
                 </div>
               )
@@ -225,15 +226,15 @@ export function WorkflowDetail() {
       <Modal
         open={forgetOpen}
         onClose={() => setForgetOpen(false)}
-        title="Historie endgültig löschen?"
+        title={t('workflow.forgetTitle')}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setForgetOpen(false)}>Abbrechen</Button>
-            <Button variant="danger" onClick={async () => { await api(`/workflows/${w.id}`, { method: 'DELETE' }); toast('Historie gelöscht'); nav(`/instances/${w.instance_id}`); }}>Löschen</Button>
+            <Button variant="ghost" onClick={() => setForgetOpen(false)}>{t('common.cancel')}</Button>
+            <Button variant="danger" onClick={async () => { await api(`/workflows/${w.id}`, { method: 'DELETE' }); toast(t('workflow.forgotten')); nav(`/instances/${w.instance_id}`); }}>{t('common.delete')}</Button>
           </>
         }
       >
-        <p className="text-sm text-muted">Alle {w.version_count} gesicherten Versionen von „{w.name}“ werden aus FlowVault entfernt. Lade vorher die letzte Version als JSON herunter, falls du sie noch brauchst.</p>
+        <p className="text-sm text-muted">{t('workflow.forgetText', { count: w.version_count, name: w.name })}</p>
       </Modal>
     </>
   );
@@ -252,7 +253,7 @@ function VersionHeader({ v, latest, aiReady, health, workflowHealth, healthUnava
   onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [msg, setMsg] = useState(v.message ?? '');
+  const [msg, setMsg] = useState(message(v.message));
   const [generating, setGenerating] = useState(false);
   const toast = useToast();
   const pending = generating || v.ai_status === 'pending';
@@ -273,7 +274,7 @@ function VersionHeader({ v, latest, aiReady, health, workflowHealth, healthUnava
   async function save() {
     await api(`/versions/${v.id}`, { method: 'PATCH', body: { message: msg } });
     setEditing(false);
-    toast('Notiz gespeichert');
+    toast(t('workflow.noteSaved'));
     onSaved();
   }
 
@@ -284,7 +285,7 @@ function VersionHeader({ v, latest, aiReady, health, workflowHealth, healthUnava
           <div className="flex items-baseline gap-3 font-mono text-xs">
             <span className="text-text">v{v.number}</span>
             <span className="text-dim">#{v.hash.slice(0, 7)}</span>
-            {latest && <span className="text-accent-hi">aktuell</span>}
+            {latest && <span className="text-accent-hi">{t('workflow.current')}</span>}
             <ChangeChips s={v.summary} />
           </div>
           <div className="mt-2 text-lg leading-snug font-medium">{versionTitle(v)}</div>
@@ -294,19 +295,19 @@ function VersionHeader({ v, latest, aiReady, health, workflowHealth, healthUnava
             </ul>
           )}
           <div className="mt-2 flex flex-wrap gap-x-3 text-xs text-dim">
-            <span>Gesichert {formatDate(v.created_at, true)}</span>
-            {v.n8n_updated_at && <span>in n8n gespeichert {formatDate(v.n8n_updated_at, true)}</span>}
+            <span>{t('workflow.backedUp', { date: formatDate(v.created_at, true) })}</span>
+            {v.n8n_updated_at && <span>{t('workflow.savedInN8n', { date: formatDate(v.n8n_updated_at, true) })}</span>}
             <span className="font-mono">{formatBytes(v.size)}</span>
-            {v.ai_summary && <span title={describeSummary(v.summary)}>Text von {v.ai_model ?? 'KI'}</span>}
+            {v.ai_summary && <span title={describeSummary(v.summary)}>{t('workflow.textBy', { model: v.ai_model ?? t('workflow.aiName') })}</span>}
           </div>
-          {v.ai_status === 'error' && !pending && <div className="mt-2 text-xs text-del">KI-Text fehlgeschlagen: {v.ai_error}</div>}
+          {v.ai_status === 'error' && !pending && <div className="mt-2 text-xs text-del">{t('workflow.aiFailed', { reason: message(v.ai_error) })}</div>}
         </div>
         <div className="flex shrink-0 gap-2">
           <Button size="sm" icon={<Download className="size-4" />} onClick={() => (window.location.href = `/api/versions/${v.id}/download`)}>
-            Download
+            {t('workflow.download')}
           </Button>
           <Button size="sm" variant={latest ? 'secondary' : 'primary'} icon={<RotateCcw className="size-4" />} onClick={onRestore}>
-            Wiederherstellen
+            {t('workflow.restore')}
           </Button>
         </div>
       </div>
@@ -314,21 +315,21 @@ function VersionHeader({ v, latest, aiReady, health, workflowHealth, healthUnava
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
         {editing ? (
           <div className="flex flex-1 gap-2">
-            <input className={inputCls} value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="z. B. Slack-Benachrichtigung ergänzt" autoFocus onKeyDown={(e) => e.key === 'Enter' && save()} />
+            <input className={inputCls} value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t('workflow.notePlaceholder')} autoFocus onKeyDown={(e) => e.key === 'Enter' && save()} />
             <Button size="md" variant="primary" icon={<Check className="size-4" />} onClick={save} />
-            <Button size="md" variant="ghost" icon={<X className="size-4" />} onClick={() => { setEditing(false); setMsg(v.message ?? ''); }} />
+            <Button size="md" variant="ghost" icon={<X className="size-4" />} onClick={() => { setEditing(false); setMsg(message(v.message)); }} />
           </div>
         ) : (
           <button onClick={() => setEditing(true)} className="group flex items-center gap-2 text-sm text-muted transition-colors hover:text-text">
             <MessageSquare className="size-4" />
-            {v.message ? <span className="text-text">{v.message}</span> : <span>Notiz hinzufügen</span>}
+            {v.message ? <span className="text-text">{message(v.message)}</span> : <span>{t('workflow.addNote')}</span>}
             <Pencil className="size-4 opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
         )}
         {aiReady && !editing && (
           <button onClick={generate} disabled={pending} className="flex items-center gap-2 text-sm text-muted transition-colors hover:text-text disabled:cursor-default disabled:hover:text-muted">
             {pending ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
-            {pending ? 'Text wird erzeugt' : v.ai_summary ? 'Text neu erzeugen' : 'Text mit KI erzeugen'}
+            {t(pending ? 'workflow.generating' : v.ai_summary ? 'workflow.regenerate' : 'workflow.generate')}
           </button>
         )}
       </div>
@@ -356,7 +357,7 @@ function CanvasInspector({ result, failing }: { result: CompareResult; failing?:
               <v.Icon className="size-4 shrink-0 text-muted" />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{node.name}</div>
-                <div className="truncate text-xs text-muted">{shortType(node.type)} · v{node.typeVersion ?? 1}{node.disabled ? ' · deaktiviert' : ''}</div>
+                <div className="truncate text-xs text-muted">{shortType(node.type)} · v{node.typeVersion ?? 1}{node.disabled ? t('workflow.disabled') : ''}</div>
               </div>
               <button onClick={() => setSel(null)} className="rounded-md p-1 text-muted hover:bg-panel-3 hover:text-text"><X className="size-4" /></button>
             </div>
@@ -365,7 +366,7 @@ function CanvasInspector({ result, failing }: { result: CompareResult; failing?:
         )}
       </div>
       <Card>
-        <div className="border-b border-line px-4 py-3 text-sm font-medium">Nodes ({regular.length})</div>
+        <div className="border-b border-line px-4 py-3 text-sm font-medium">{t('workflow.nodesTitle', { count: regular.length })}</div>
         <div className="grid sm:grid-cols-2 xl:grid-cols-3">
           {regular.map((n) => {
             const nv = nodeVisual(n.node.type);
@@ -393,8 +394,8 @@ function JsonView({ result }: { result: CompareResult }) {
   return (
     <Card className="relative">
       <div className="absolute top-3 right-3 flex gap-2">
-        <Button size="sm" icon={<Copy className="size-4" />} onClick={() => { navigator.clipboard.writeText(json); toast('In die Zwischenablage kopiert – in n8n einfach einfügen (⌘V)'); }}>
-          Kopieren
+        <Button size="sm" icon={<Copy className="size-4" />} onClick={() => { navigator.clipboard.writeText(json); toast(t('workflow.copied')); }}>
+          {t('workflow.copy')}
         </Button>
       </div>
       <pre className="max-h-[70vh] overflow-auto p-4 font-mono text-[12px] leading-5 text-text/80">{json}</pre>

@@ -4,16 +4,17 @@ import {
   Repeat, Send, Split, StickyNote, Table, Webhook, Zap, Plus, Trash2, RotateCcw, AlertTriangle, ArrowRightLeft, GitCommitHorizontal,
   type LucideIcon,
 } from 'lucide-react';
-import { describeSummary, type ChangeSummary } from '../../../shared/diff.ts';
+import type { ChangeSummary } from '../../../shared/diff.ts';
 import type { ActivityItem } from '../api.ts';
-import { cx, timeAgo } from '../util.ts';
+import { cx, describeSummary, timeAgo } from '../util.ts';
+import { message, t, type MessageKey } from '../i18n.tsx';
 
 /**
  * Erkennungsmerkmal von FlowVault: der Änderungszähler im Git-Stil.
  * Überall gleich – Timeline, Feed, Tabellen, Vergleich.
  */
 export function ChangeChips({ s, compact }: { s: ChangeSummary; compact?: boolean }) {
-  if (s.initial) return <span className="font-mono text-xs text-dim">initial</span>;
+  if (s.initial) return <span className="font-mono text-xs text-dim">{t('changes.chipInitial')}</span>;
   const edges = s.connectionsAdded + s.connectionsRemoved;
   const parts: [string, string][] = [];
   if (s.added.length) parts.push([`+${s.added.length}`, 'text-add']);
@@ -23,8 +24,8 @@ export function ChangeChips({ s, compact }: { s: ChangeSummary; compact?: boolea
   if (!parts.length) return null;
   return (
     <span className="inline-flex items-center gap-2 font-mono text-xs">
-      {parts.map(([t, c]) => (
-        <span key={t} className={c}>{t}</span>
+      {parts.map(([text, c]) => (
+        <span key={text} className={c}>{text}</span>
       ))}
     </span>
   );
@@ -65,18 +66,18 @@ export function nodeVisual(type: string): { Icon: LucideIcon; color: string; tri
   return { Icon: Circle, color: '#a3a8b2', trigger };
 }
 
-const KIND: Record<ActivityItem['kind'], { Icon: LucideIcon; label: string; tone?: string }> = {
-  created: { Icon: Plus, label: 'Neu gesichert' },
-  changed: { Icon: GitCommitHorizontal, label: '' },
-  restored: { Icon: RotateCcw, label: '' },
-  promoted: { Icon: ArrowRightLeft, label: 'In andere Umgebung übernommen' },
-  deleted: { Icon: Trash2, label: 'In n8n gelöscht', tone: 'text-del' },
-  sync_error: { Icon: AlertTriangle, label: 'Sync fehlgeschlagen', tone: 'text-del' },
+const KIND: Record<ActivityItem['kind'], { Icon: LucideIcon; label?: MessageKey; tone?: string }> = {
+  created: { Icon: Plus, label: 'activity.kind.created' },
+  changed: { Icon: GitCommitHorizontal },
+  restored: { Icon: RotateCcw },
+  promoted: { Icon: ArrowRightLeft, label: 'activity.kind.promoted' },
+  deleted: { Icon: Trash2, label: 'activity.kind.deleted', tone: 'text-del' },
+  sync_error: { Icon: AlertTriangle, label: 'activity.kind.syncError', tone: 'text-del' },
 };
 
 export function ActivityRow({ a }: { a: ActivityItem }) {
   const k = KIND[a.kind];
-  const title = a.ai_summary?.title ?? (a.summary ? describeSummary(a.summary) : k.label);
+  const title = a.ai_summary?.title ?? (a.summary ? describeSummary(a.summary) : k.label ? t(k.label) : '');
   const href = a.version_id ? `/workflows/${a.workflow_id}?v=${a.version_id}` : a.workflow_id ? `/workflows/${a.workflow_id}` : `/instances/${a.instance_id}`;
   return (
     <Link to={href} className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-panel-2">
@@ -88,8 +89,8 @@ export function ActivityRow({ a }: { a: ActivityItem }) {
           {a.summary && <ChangeChips s={a.summary} compact />}
         </div>
         <div className={cx('mt-0.5 truncate text-[13px]', k.tone ?? 'text-muted')}>
-          {a.message && <span className="text-text">{a.message} · </span>}
-          {a.kind === 'sync_error' ? a.detail : title}
+          {a.message && <span className="text-text">{message(a.message)} · </span>}
+          {a.kind === 'sync_error' ? message(a.detail) : title}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">

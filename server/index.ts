@@ -6,6 +6,7 @@ import { encrypt, decrypt } from './crypto.ts';
 import { N8nClient, normalizeBaseUrl } from './n8n.ts';
 import { announceSetupCode, requireAuth } from './auth.ts';
 import { createAuthRouter } from './auth-router.ts';
+import { createDashboardRouter } from './dashboard.ts';
 import { buildInfo } from './version.ts';
 import { updates } from './updates.ts';
 import {
@@ -13,11 +14,13 @@ import {
 } from './sync.ts';
 import { diffWorkflows } from '../shared/diff.ts';
 import {
-  KEY_REQUIRED_AI, backfill, generateForVersion, listModels, publicAiConfig, resumeQueue, saveAiConfig, wouldMoveStoredKey,
+  backfill, generateForVersion, listModels, publicAiConfig, resumeQueue, saveAiConfig, wouldMoveStoredKey,
 } from './ai.ts';
 import { healthProxy, internalRouter } from './internal.ts';
 import { startHealthService } from './services.ts';
 import { promoteRouter } from './promote/router.ts';
+import { HttpError, languageWarning, requestT, t } from '../shared/i18n/server.ts';
+import { renderError, type Translator } from '../shared/i18n/index.ts';
 
 const parseAi = (v: unknown) => (v ? JSON.parse(String(v)) : null);
 
@@ -25,26 +28,18 @@ const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? '127.0.0.1';
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 
-class HttpError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
 const num = (v: unknown) => {
   const n = Number(v);
-  if (!Number.isInteger(n)) throw new HttpError(400, 'Ungültige ID');
+  if (!Number.isInteger(n)) throw new HttpError(400, 'errors.http.invalidId');
   return n;
 };
 /** Ganzzahl aus Query/Body, auf [min, max] begrenzt. */
 const intParam = (v: unknown, def: number, min: number, max: number) => {
   if (v === undefined || v === '') return def;
   const n = Number(v);
-  if (!Number.isInteger(n)) throw new HttpError(400, 'Ungültiger Zahlenwert');
+  if (!Number.isInteger(n)) throw new HttpError(400, 'errors.http.invalidNumber');
   return Math.max(min, Math.min(max, n));
 };
-const KEY_REQUIRED = 'Bei geänderter URL bitte den API-Key erneut eingeben';
 
 const app = express();
 app.disable('x-powered-by');
@@ -96,10 +91,10 @@ app.use('/api', (req, _res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   const site = req.headers['sec-fetch-site'];
   if (site ? site !== 'same-origin' && site !== 'none' : req.headers.origin !== undefined && !originMatchesHost(req)) {
-    throw new HttpError(403, 'Anfrage von einer fremden Seite abgelehnt');
+    throw new HttpError(403, 'errors.http.foreignOrigin');
   }
   if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) {
-    throw new HttpError(415, 'Content-Type muss application/json sein');
+    throw new HttpError(415, 'errors.http.contentType');
   }
   next();
 });
@@ -115,26 +110,24 @@ let proxyWarned = false;
 function clientIp(req: Request) {
   if (!TRUST_PROXY && !proxyWarned && req.headers['x-forwarded-for']) {
     proxyWarned = true;
-    console.warn(
-      '[auth] X-Forwarded-For erkannt, aber TRUST_PROXY ist nicht gesetzt: Alle Anmeldeversuche zählen für die IP des Proxys,' +
-        ' ein Angreifer kann so alle aussperren. Hinter einem Reverse Proxy TRUST_PROXY=1 setzen.',
-    );
+    console.warn(t('log.proxyWarning'));
   }
   return req.ip ?? 'unknown';
 }
 
 app.use('/api/auth', createAuthRouter(clientIp));
 app.use('/api', requireAuth);
+app.use('/api/dashboard', createDashboardRouter());
 app.get('/api/system', (_req, res) => res.json({ ...buildInfo, updates: updates.info() }));
 
 // ───────────────────────── Instanzen ─────────────────────────
 
-function publicInstance(i: InstanceRow) {
+function publicInstance(i: InstanceRow, tr: Translator) {
   let keyHint = '';
   try {
     keyHint = '…' + decrypt(i.api_key_enc).slice(-4);
   } catch {
-    keyHint = '(nicht entschlüsselbar)';
+    keyHint = tr('errors.instance.unreadableKey');
   }
   const counts = db
     .prepare(
@@ -163,12 +156,12 @@ function publicInstance(i: InstanceRow) {
 function instanceInput(body: Record<string, unknown>, partial = false) {
   const name = String(body.name ?? '').trim();
   const base_url = body.base_url ? normalizeBaseUrl(String(body.base_url)) : '';
-  if (!partial || body.name !== undefined) if (!name) throw new HttpError(400, 'Name fehlt');
+  if (!partial || body.name !== undefined) if (!name) throw new HttpError(400, 'errors.instance.nameMissing');
   if (!partial || body.base_url !== undefined) {
     try {
       new URL(base_url);
     } catch {
-      throw new HttpError(400, 'Ungültige URL');
+      throw new HttpError(400, 'errors.instance.invalidUrl');
     }
   }
   const interval = Math.max(0, Math.min(1440, Math.round(Number(body.sync_interval ?? 15))));
@@ -177,16 +170,17 @@ function instanceInput(body: Record<string, unknown>, partial = false) {
   return { name, base_url, interval, color, include_archived };
 }
 
-app.get('/api/instances', (_req, res) => {
+app.get('/api/instances', (req, res) => {
   const rows = db.prepare('SELECT * FROM instances ORDER BY name COLLATE NOCASE').all() as unknown as InstanceRow[];
-  res.json(rows.map(publicInstance));
+  const tr = requestT(req);
+  res.json(rows.map((r) => publicInstance(r, tr)));
 });
 
 app.get('/api/instances/:id', (req, res) => {
   const inst = getInstance(num(req.params.id));
-  if (!inst) throw new HttpError(404, 'Instanz nicht gefunden');
+  if (!inst) throw new HttpError(404, 'errors.instance.notFound');
   const runs = db.prepare('SELECT * FROM sync_runs WHERE instance_id = ? ORDER BY id DESC LIMIT 30').all(inst.id);
-  res.json({ ...publicInstance(inst), runs });
+  res.json({ ...publicInstance(inst, requestT(req)), runs });
 });
 
 app.post('/api/instances/test', async (req, res) => {
@@ -196,44 +190,44 @@ app.post('/api/instances/test', async (req, res) => {
     const inst = getInstance(num(req.body.id));
     if (inst) {
       // Der gespeicherte Key geht nur an die gespeicherte Adresse
-      if (inst.base_url !== base_url) throw new HttpError(400, KEY_REQUIRED);
+      if (inst.base_url !== base_url) throw new HttpError(400, 'errors.instance.keyRequired');
       key = decrypt(inst.api_key_enc);
     }
   }
-  if (!key) throw new HttpError(400, 'API-Key fehlt');
+  if (!key) throw new HttpError(400, 'errors.instance.apiKeyMissing');
   try {
     const r = await new N8nClient(base_url, key).test();
     res.json({ ok: true, base_url, workflows: r.workflows });
   } catch (e) {
-    res.json({ ok: false, base_url, error: (e as Error).message });
+    res.json({ ok: false, base_url, error: renderError(e, requestT(req)) });
   }
 });
 
 app.post('/api/instances', (req, res) => {
   const { name, base_url, interval, color, include_archived } = instanceInput(req.body ?? {});
   const key = String(req.body?.api_key ?? '').trim();
-  if (!key) throw new HttpError(400, 'API-Key fehlt');
+  if (!key) throw new HttpError(400, 'errors.instance.apiKeyMissing');
   const r = db
     .prepare('INSERT INTO instances (name, base_url, api_key_enc, color, sync_interval, include_archived, created_at) VALUES (?,?,?,?,?,?,?)')
     .run(name, base_url, encrypt(key), color, interval, include_archived, Date.now());
   const id = Number(r.lastInsertRowid);
   syncInstance(id, 'manual').catch(() => {});
-  res.status(201).json(publicInstance(getInstance(id)!));
+  res.status(201).json(publicInstance(getInstance(id)!, requestT(req)));
 });
 
 app.put('/api/instances/:id', (req, res) => {
   const inst = getInstance(num(req.params.id));
-  if (!inst) throw new HttpError(404, 'Instanz nicht gefunden');
+  if (!inst) throw new HttpError(404, 'errors.instance.notFound');
   const { name, base_url, interval, color, include_archived } = instanceInput({ ...inst, ...req.body });
   const key = String(req.body?.api_key ?? '').trim();
-  if (!key && base_url !== inst.base_url) throw new HttpError(400, KEY_REQUIRED);
+  if (!key && base_url !== inst.base_url) throw new HttpError(400, 'errors.instance.keyRequired');
   const enabled = req.body?.enabled === undefined ? inst.enabled : req.body.enabled ? 1 : 0;
   db.prepare('UPDATE instances SET name=?, base_url=?, color=?, sync_interval=?, enabled=?, include_archived=?, api_key_enc=? WHERE id=?').run(
     name, base_url, color, interval, enabled, include_archived, key ? encrypt(key) : inst.api_key_enc, inst.id,
   );
   // Gerade eingeschaltet: archivierte Workflows gleich sichern statt erst beim nächsten Intervall
   if (include_archived && !inst.include_archived) syncInstance(inst.id, 'manual').catch(() => {});
-  res.json(publicInstance(getInstance(inst.id)!));
+  res.json(publicInstance(getInstance(inst.id)!, requestT(req)));
 });
 
 app.delete('/api/instances/:id', (req, res) => {
@@ -243,12 +237,12 @@ app.delete('/api/instances/:id', (req, res) => {
 
 app.post('/api/instances/:id/sync', async (req, res) => {
   const id = num(req.params.id);
-  if (!getInstance(id)) throw new HttpError(404, 'Instanz nicht gefunden');
+  if (!getInstance(id)) throw new HttpError(404, 'errors.instance.notFound');
   try {
     const r = await syncInstance(id, 'manual');
     res.json({ ok: true, ...r });
   } catch (e) {
-    res.status(502).json({ ok: false, error: (e as Error).message });
+    res.status(502).json({ ok: false, error: renderError(e, requestT(req)) });
   }
 });
 
@@ -284,11 +278,12 @@ app.get('/api/overview', (_req, res) => {
               (SELECT COUNT(*) FROM versions) AS versions,
               (SELECT COUNT(*) FROM versions WHERE created_at > ?) AS versions_7d,
               (SELECT MAX(last_sync_at) FROM instances) AS last_sync,
+              (SELECT MIN(created_at) FROM versions) AS first_backup,
               (SELECT COALESCE(SUM(LENGTH(snapshot)), 0) FROM versions) AS storage_bytes`,
     )
     .get(Date.now() - 7 * 864e5);
 
-  // Änderungen pro Tag (letzte 30 Tage) für die Aktivitäts-Heatmap
+  // UTC-Tageswerte für alle auswählbaren Heatmap-Zeiträume (bis zu 12 Monate).
   const days = db
     .prepare(
       `SELECT CAST((created_at / 86400000) AS INTEGER) AS day, COUNT(*) AS n FROM versions
@@ -364,7 +359,7 @@ app.get('/api/workflows/:id', (req, res) => {
          FROM workflows w JOIN instances i ON i.id = w.instance_id WHERE w.id = ?`,
     )
     .get(num(req.params.id)) as Record<string, unknown> | undefined;
-  if (!w) throw new HttpError(404, 'Workflow nicht gefunden');
+  if (!w) throw new HttpError(404, 'errors.workflow.notFound');
   const versions = db
     .prepare(
       `SELECT id, number, hash, summary, message, n8n_version_id, n8n_updated_at, created_at, LENGTH(snapshot) AS size,
@@ -395,7 +390,7 @@ function versionMeta(id: number) {
          FROM versions v JOIN workflows w ON w.id = v.workflow_id WHERE v.id = ?`,
     )
     .get(id) as Record<string, unknown> | undefined;
-  if (!v) throw new HttpError(404, 'Version nicht gefunden');
+  if (!v) throw new HttpError(404, 'errors.version.notFound');
   return { ...v, summary: JSON.parse(String(v.summary)), ai_summary: parseAi(v.ai_summary) } as unknown as Record<string, unknown> & {
     id: number; workflow_id: number; number: number;
   };
@@ -444,7 +439,7 @@ app.get('/api/compare', (req, res) => {
 app.post('/api/versions/:id/restore', async (req, res) => {
   // Kein Standardwert: Überschreiben in n8n muss ausdrücklich angefordert werden
   const mode = req.body?.mode;
-  if (mode !== 'overwrite' && mode !== 'copy') throw new HttpError(400, 'mode muss "overwrite" oder "copy" sein');
+  if (mode !== 'overwrite' && mode !== 'copy') throw new HttpError(400, 'errors.restore.modeInvalid');
   try {
     const r = await restoreVersion(num(req.params.id), {
       mode,
@@ -456,7 +451,7 @@ app.post('/api/versions/:id/restore', async (req, res) => {
       | undefined;
     res.json({ ok: true, workflowId: wf?.id, mapped: r.mapped ?? 0 });
   } catch (e) {
-    throw new HttpError(502, (e as Error).message);
+    throw new HttpError(502, { raw: renderError(e, requestT(req)) });
   }
 });
 
@@ -465,14 +460,14 @@ app.post('/api/workflows/:id/refresh', async (req, res) => {
   const w = db.prepare('SELECT instance_id, n8n_id, latest_hash FROM workflows WHERE id = ?').get(num(req.params.id)) as
     | { instance_id: number; n8n_id: string; latest_hash: string }
     | undefined;
-  if (!w) throw new HttpError(404, 'Workflow nicht gefunden');
+  if (!w) throw new HttpError(404, 'errors.workflow.notFound');
   const inst = getInstance(w.instance_id)!;
   try {
     const fresh = await clientFor(inst).getWorkflow(w.n8n_id);
     const r = recordWorkflow(inst, fresh);
     res.json({ ok: true, changed: !!r });
   } catch (e) {
-    res.json({ ok: false, error: (e as Error).message });
+    res.json({ ok: false, error: renderError(e, requestT(req)) });
   }
 });
 
@@ -486,12 +481,13 @@ app.put('/api/ai/settings', (req, res) => {
   const b = req.body ?? {};
   const base_url = b.base_url === undefined ? undefined : String(b.base_url);
   const api_key = b.api_key ? String(b.api_key) : undefined;
-  if (!api_key && wouldMoveStoredKey(base_url)) throw new HttpError(400, KEY_REQUIRED_AI);
+  if (!api_key && wouldMoveStoredKey(base_url)) throw new HttpError(400, 'errors.ai.keyRequired');
   saveAiConfig({
     enabled: b.enabled === undefined ? undefined : !!b.enabled,
     auto: b.auto === undefined ? undefined : !!b.auto,
     base_url,
     model: b.model === undefined ? undefined : String(b.model),
+    language: b.language === undefined ? undefined : String(b.language),
     api_key,
   });
   res.json(publicAiConfig());
@@ -503,7 +499,7 @@ app.post('/api/ai/models', async (req, res) => {
     const models = await listModels({ baseUrl: req.body?.base_url || undefined, apiKey: req.body?.api_key || undefined });
     res.json({ ok: true, models });
   } catch (e) {
-    res.json({ ok: false, error: (e as Error).message });
+    res.json({ ok: false, error: renderError(e, requestT(req)) });
   }
 });
 
@@ -512,12 +508,12 @@ app.post('/api/versions/:id/ai', async (req, res) => {
     const summary = await generateForVersion(num(req.params.id));
     res.json({ ok: true, ai_summary: summary });
   } catch (e) {
-    throw new HttpError(502, (e as Error).message);
+    throw new HttpError(502, { raw: renderError(e, requestT(req)) });
   }
 });
 
 app.post('/api/ai/backfill', (req, res) => {
-  if (!publicAiConfig().configured) throw new HttpError(400, 'Kein Melious-API-Key hinterlegt');
+  if (!publicAiConfig().configured) throw new HttpError(400, 'errors.ai.keyMissing');
   const count = backfill(intParam(req.body?.limit, 200, 1, 1000));
   res.json({ ok: true, count });
 });
@@ -531,7 +527,7 @@ app.use('/api/promote', promoteRouter);
 app.use('/api/health', healthProxy);
 
 app.use('/api', (_req, _res) => {
-  throw new HttpError(404, 'Unbekannter Endpunkt');
+  throw new HttpError(404, 'errors.http.unknownEndpoint');
 });
 
 // ───────────────────────── Frontend (Produktion) ─────────────────────────
@@ -542,16 +538,19 @@ if (fs.existsSync(webDist)) {
   app.get('/{*splat}', (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
 }
 
-app.use((err: Error & { status?: number; type?: string }, _req: Request, res: Response, _next: NextFunction) => {
-  const status = err.status ?? (err.type === 'entity.parse.failed' ? 400 : 500);
+app.use((err: Error & { status?: number; type?: string }, req: Request, res: Response, _next: NextFunction) => {
+  const status = err.status || (err.type === 'entity.parse.failed' ? 400 : 500);
   // Unerwartete Fehler (z. B. aus SQLite) nur ins Log, nicht an den Browser
   const expose = err instanceof HttpError || status < 500;
   if (!expose) console.error(err);
-  res.status(status).json({ error: expose ? err.message || 'Fehler' : 'Interner Fehler' });
+  const tr = requestT(req);
+  res.status(status).json({ error: expose ? renderError(err, tr) || tr('errors.http.generic') : tr('errors.http.internal') });
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`\n  FlowVault läuft auf http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}\n`);
+  console.log(`\n  ${t('log.listening', { url: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}` })}\n`);
+  const languageIssue = languageWarning();
+  if (languageIssue) console.warn(`  ${languageIssue}\n`);
   announceSetupCode();
   startScheduler();
   resumeQueue();

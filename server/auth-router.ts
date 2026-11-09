@@ -12,25 +12,23 @@ import {
 } from './two-factor.ts';
 
 import { updates, type createUpdateService } from './updates.ts';
+import { fail, serverLocale } from '../shared/i18n/server.ts';
 
 const LOGIN_COOKIE = 'fv_login';
 const LOGIN_TTL = 5 * 60_000;
 const ENROLL_TTL = 10 * 60_000;
 type Challenge = { token: string; secret_enc: string | null; attempts: number };
 
-function fail(status: number, message: string): never {
-  throw Object.assign(new Error(message), { status });
-}
 
 function emailInput(value: unknown) {
   const email = String(value ?? '').trim().toLowerCase();
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'Bitte eine gültige E-Mail-Adresse eingeben');
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, 'errors.auth.invalidEmail');
   return email;
 }
 
 function passwordInput(value: unknown) {
   const password = String(value ?? '');
-  if (password.length < 8 || password.length > 1024) fail(400, 'Passwort muss zwischen 8 und 1024 Zeichen haben');
+  if (password.length < 8 || password.length > 1024) fail(400, 'errors.auth.invalidPassword');
   return password;
 }
 
@@ -52,13 +50,13 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   const ip = (req: Request) => `auth:${clientIp(req)}`;
   function throttle(req: Request, _res: Response, next: NextFunction) {
     const wait = loginThrottle(ip(req));
-    if (wait) fail(429, `Zu viele Versuche – bitte ${wait}s warten`);
+    if (wait) fail(429, 'errors.auth.throttled', { seconds: wait });
     next();
   }
   const revision = () => getSetting('auth_revision') ?? '';
 
   function assertFresh(req: Request, proof: string) {
-    if (!isAuthenticated(req) || proof !== revision()) fail(401, 'Sitzung abgelaufen – bitte erneut anmelden');
+    if (!isAuthenticated(req) || proof !== revision()) fail(401, 'errors.auth.sessionExpired');
   }
 
   async function reauthenticate(req: Request, factor = true) {
@@ -67,7 +65,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     assertFresh(req, before);
     if (!valid || (factor && twoFactorEnabled() && !consumeSecondFactor(String(req.body?.factor ?? '')))) {
       loginFailed(ip(req));
-      fail(401, 'Passwort oder Sicherheitscode ist falsch bzw. bereits verwendet');
+      fail(401, 'errors.auth.reauthFailed');
     }
     return before;
   }
@@ -75,7 +73,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   router.get('/status', (req, res) => {
     const authenticated = isAuthenticated(req);
     res.json({
-      setup: isSetUp(), authenticated, emailLogin: !!adminEmail(),
+      setup: isSetUp(), authenticated, emailLogin: !!adminEmail(), defaultLanguage: serverLocale,
       ...(authenticated ? {
         emailRequired: !adminEmail(), email: adminEmail(), envEmail: !!process.env.ADMIN_EMAIL,
         envPassword: !!process.env.ADMIN_PASSWORD, twoFactor: twoFactorEnabled(), recoveryCodesRemaining: recoveryHashes().length,
@@ -84,16 +82,16 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   });
 
   router.post('/setup', throttle, async (req, res) => {
-    if (isSetUp()) fail(409, 'Bereits eingerichtet');
+    if (isSetUp()) fail(409, 'errors.auth.alreadySetUp');
     const email = emailInput(req.body?.email);
-    if (process.env.ADMIN_EMAIL && email !== adminEmail()) fail(400, 'E-Mail muss der konfigurierten ADMIN_EMAIL entsprechen');
+    if (process.env.ADMIN_EMAIL && email !== adminEmail()) fail(400, 'errors.auth.emailMustMatchEnv');
     const password = passwordInput(req.body?.password);
     if (!consumeSetupCode(String(req.body?.code ?? ''))) {
       loginFailed(ip(req));
-      fail(403, 'Einrichtungscode falsch – er steht im Server-Log');
+      fail(403, 'errors.auth.wrongSetupCode');
     }
     const hashed = await hashPassword(password);
-    if (isSetUp()) fail(409, 'Bereits eingerichtet');
+    if (isSetUp()) fail(409, 'errors.auth.alreadySetUp');
     tx(() => {
       setSetting('admin_password', hashed);
       setSetting('admin_email', email);
@@ -109,7 +107,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     if (!valid || (adminEmail() && !safeEqual(email, adminEmail())) || before !== revision()) {
       loginFailed(ip(req));
-      fail(401, 'E-Mail oder Passwort ist falsch');
+      fail(401, 'errors.auth.wrongCredentials');
     }
     clearLogin(req, res);
     if (twoFactorEnabled()) {
@@ -128,12 +126,12 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   router.post('/login/verify', throttle, (req, res) => {
     const token = readCookie(req, LOGIN_COOKIE);
     const challenge = token ? db.prepare("SELECT * FROM auth_challenges WHERE token = ? AND kind = 'login' AND expires_at > ?").get(sha256(token), Date.now()) as Challenge | undefined : undefined;
-    if (!challenge) fail(401, 'Anmeldung abgelaufen – bitte erneut mit E-Mail und Passwort anmelden');
+    if (!challenge) fail(401, 'errors.auth.loginExpired');
     if (!consumeSecondFactor(String(req.body?.factor ?? ''))) {
       db.prepare('UPDATE auth_challenges SET attempts = attempts + 1 WHERE token = ?').run(challenge.token);
       loginFailed(ip(req));
       if (challenge.attempts >= 4) clearLogin(req, res);
-      fail(401, challenge.attempts >= 4 ? 'Zu viele falsche Codes – bitte erneut mit E-Mail und Passwort anmelden' : 'Sicherheitscode ist falsch oder bereits verwendet');
+      fail(401, challenge.attempts >= 4 ? 'errors.auth.tooManyCodesLogin' : 'errors.auth.wrongFactor');
     }
     clearLogin(req, res);
     loginSucceeded(ip(req));
@@ -151,7 +149,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
 
   // Also used for the one-time migration of old password-only installations.
   router.post('/email', throttle, async (req, res) => {
-    if (process.env.ADMIN_EMAIL) fail(400, 'E-Mail wird über ADMIN_EMAIL gesetzt');
+    if (process.env.ADMIN_EMAIL) fail(400, 'errors.auth.emailFromEnv');
     const email = emailInput(req.body?.email);
     const proof = await reauthenticate(req);
     assertFresh(req, proof);
@@ -176,7 +174,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   });
 
   router.post('/password', throttle, async (req, res) => {
-    if (process.env.ADMIN_PASSWORD) fail(400, 'Passwort wird über ADMIN_PASSWORD gesetzt');
+    if (process.env.ADMIN_PASSWORD) fail(400, 'errors.auth.passwordFromEnv');
     const next = passwordInput(req.body?.next);
     // Hash first; reauthenticate immediately before changing anything (no await after proof).
     const hashed = await hashPassword(next);
@@ -191,12 +189,12 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   });
 
   router.post('/2fa/setup', throttle, async (req, res) => {
-    if (twoFactorEnabled()) fail(409, '2FA ist bereits aktiviert');
+    if (twoFactorEnabled()) fail(409, 'errors.auth.twoFactorAlreadyOn');
     const secret = newTotpSecret();
     const qrCode = await QRCode.toDataURL(totp(secret, adminEmail()).toString(), { width: 256, margin: 4 });
     const proof = await reauthenticate(req, false);
     assertFresh(req, proof);
-    if (twoFactorEnabled()) fail(409, '2FA ist bereits aktiviert');
+    if (twoFactorEnabled()) fail(409, 'errors.auth.twoFactorAlreadyOn');
     db.prepare("DELETE FROM auth_challenges WHERE expires_at <= ? OR (kind = 'enroll' AND session_token = ?)").run(Date.now(), sessionHash(req));
     db.prepare('INSERT INTO auth_challenges (token, kind, session_token, secret_enc, expires_at) VALUES (?, ?, ?, ?, ?)').run(
       sha256(randomToken()), 'enroll', sessionHash(req), encrypt(secret), Date.now() + ENROLL_TTL,
@@ -206,9 +204,9 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   });
 
   router.post('/2fa/enable', throttle, (req, res) => {
-    if (twoFactorEnabled()) fail(409, '2FA ist bereits aktiviert');
+    if (twoFactorEnabled()) fail(409, 'errors.auth.twoFactorAlreadyOn');
     const challenge = db.prepare("SELECT * FROM auth_challenges WHERE kind = 'enroll' AND session_token = ? AND expires_at > ?").get(sessionHash(req), Date.now()) as Challenge | undefined;
-    if (!challenge?.secret_enc) fail(400, 'Einrichtung abgelaufen – bitte erneut starten');
+    if (!challenge?.secret_enc) fail(400, 'errors.auth.enrollExpired');
     // The encrypted pending secret only becomes active after a successful code check.
     const { secret_enc } = challenge;
     const counter = totpCounter(decrypt(secret_enc), String(req.body?.factor ?? ''));
@@ -216,7 +214,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       db.prepare('UPDATE auth_challenges SET attempts = attempts + 1 WHERE token = ?').run(challenge.token);
       if (challenge.attempts >= 4) db.prepare('DELETE FROM auth_challenges WHERE token = ?').run(challenge.token);
       loginFailed(ip(req));
-      fail(400, challenge.attempts >= 4 ? 'Zu viele falsche Codes – bitte die Einrichtung neu starten' : 'Authenticator-Code ist falsch');
+      fail(400, challenge.attempts >= 4 ? 'errors.auth.tooManyCodesEnroll' : 'errors.auth.wrongAuthenticatorCode');
     }
     const codes = tx(() => {
       setSetting('admin_totp_secret', secret_enc);
@@ -235,7 +233,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   });
 
   router.post('/2fa/disable', throttle, async (req, res) => {
-    if (!twoFactorEnabled()) fail(400, '2FA ist nicht aktiviert');
+    if (!twoFactorEnabled()) fail(400, 'errors.auth.twoFactorNotOn');
     const proof = await reauthenticate(req);
     assertFresh(req, proof);
     tx(() => {
@@ -247,7 +245,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
   });
 
   router.post('/2fa/recovery', throttle, async (req, res) => {
-    if (!twoFactorEnabled()) fail(400, '2FA ist nicht aktiviert');
+    if (!twoFactorEnabled()) fail(400, 'errors.auth.twoFactorNotOn');
     const proof = await reauthenticate(req);
     assertFresh(req, proof);
     const codes = tx(() => {

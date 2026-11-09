@@ -25,6 +25,10 @@ npm run build
 
 Für Verhaltensänderungen ergänze passende Tests, soweit sie den Fehler oder das neue Verhalten sinnvoll absichern. Bei UI-Änderungen beschreibe, wie du sie im Browser geprüft hast. Passe die Dokumentation an, wenn sich Einrichtung oder Bedienung ändern.
 
+## Übersetzungen
+
+Texte der Oberfläche und des Servers liegen unter `shared/i18n/locales/`. Neue Texte zuerst auf Deutsch anlegen und in jeder Sprache ergänzen; `npm run typecheck` und `npm test` melden fehlende Schlüssel und abweichende Platzhalter. Wie eine weitere Sprache hinzukommt, steht in [docs/I18N.md](docs/I18N.md).
+
 ## Issues und Pull Requests
 
 - Fehler: Version/Commit, Node.js- oder Docker-Version, erwartetes und tatsächliches Verhalten sowie reproduzierbare Schritte nennen.

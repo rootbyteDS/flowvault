@@ -5,6 +5,8 @@ import { onVersionCreated } from './ai.ts';
 import { mappingSetFor, workflowLabelsFor } from './promote/mappings.ts';
 import { transformSnapshot } from './promote/transform.ts';
 import { diffWorkflows, hashableContent, stableStringify, type ChangeSummary, type Snapshot } from '../shared/diff.ts';
+import { LocalizedError, packError, packMessage, renderError } from '../shared/i18n/index.ts';
+import { t } from '../shared/i18n/server.ts';
 
 export interface InstanceRow {
   id: number;
@@ -161,7 +163,7 @@ export function isSyncing(instanceId: number) {
 
 export async function syncInstance(instanceId: number, trigger: 'manual' | 'schedule' | 'restore' = 'manual') {
   const inst = getInstance(instanceId);
-  if (!inst) throw new Error('Instanz nicht gefunden');
+  if (!inst) throw new LocalizedError({ key: 'errors.instance.notFound' }, 404);
   if (running.has(instanceId)) return { skipped: true as const };
   running.add(instanceId);
 
@@ -211,7 +213,8 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
     db.prepare('UPDATE instances SET last_sync_at=?, last_sync_ok=1, last_sync_error=NULL WHERE id=?').run(Date.now(), instanceId);
     return { skipped: false as const, ...stats };
   } catch (e) {
-    const msg = (e as Error).message;
+    // Fertige Texte würden die Sprache des Servers einfrieren – gespeichert wird eine übersetzbare Meldung
+    const msg = packError(e);
     db.prepare('UPDATE sync_runs SET finished_at=?, ok=0, error=? WHERE id=?').run(Date.now(), msg, runId);
     db.prepare('UPDATE instances SET last_sync_at=?, last_sync_ok=0, last_sync_error=? WHERE id=?').run(Date.now(), msg, instanceId);
     if (inst.last_sync_ok !== 0) {
@@ -236,7 +239,7 @@ export function startScheduler() {
       )
       .all(Date.now()) as { id: number }[];
     for (const { id } of due) {
-      syncInstance(id, 'schedule').catch((e) => console.warn(`[sync] Instanz ${id}: ${(e as Error).message}`));
+      syncInstance(id, 'schedule').catch((e) => console.warn(t('log.syncInstance', { id, reason: renderError(e, t) })));
     }
   };
   setTimeout(tick, 3_000);
@@ -253,13 +256,13 @@ export async function restoreVersion(
       `SELECT v.id, v.number, w.instance_id, w.n8n_id, w.deleted_at FROM versions v JOIN workflows w ON w.id = v.workflow_id WHERE v.id = ?`,
     )
     .get(versionId) as { id: number; number: number; instance_id: number; n8n_id: string; deleted_at: number | null } | undefined;
-  if (!v) throw new Error('Version nicht gefunden');
+  if (!v) throw new LocalizedError({ key: 'errors.version.notFound' }, 404);
   const snap = loadSnapshot(versionId)!;
 
   if (opts.mode === 'overwrite') {
     const inst = getInstance(v.instance_id)!;
     const client = clientFor(inst);
-    if (v.deleted_at) throw new Error('Der Workflow existiert in n8n nicht mehr – bitte „Als Kopie anlegen“ verwenden.');
+    if (v.deleted_at) throw new LocalizedError({ key: 'errors.restore.workflowGone' }, 409);
     await client.updateWorkflow(v.n8n_id, snap);
     const fresh = await client.getWorkflow(v.n8n_id);
     recordWorkflow(inst, fresh, { restoredFrom: v.number });
@@ -267,7 +270,7 @@ export async function restoreVersion(
   }
 
   const inst = getInstance(opts.targetInstanceId ?? v.instance_id);
-  if (!inst) throw new Error('Ziel-Instanz nicht gefunden');
+  if (!inst) throw new LocalizedError({ key: 'errors.restore.targetNotFound' }, 404);
   const client = clientFor(inst);
 
   // Auf eine andere Instanz: gespeicherte Zuordnungen anwenden (Umgebungen-Modul)
@@ -281,6 +284,6 @@ export async function restoreVersion(
 
   const created = await client.createWorkflow({ ...snapOut, name: opts.name?.trim() || `${snap.name} (v${v.number})` });
   const fresh = await client.getWorkflow(String(created.id));
-  recordWorkflow(inst, fresh, { message: `Kopie von „${snap.name}“ Version ${v.number}` });
+  recordWorkflow(inst, fresh, { message: packMessage('versionMessage.copied', { name: snap.name, version: v.number }) });
   return { instanceId: inst.id, n8nId: String(created.id), mapped };
 }

@@ -10,6 +10,8 @@
  *   POST   /:sourceId/:targetId/promote         Workflows übernehmen
  */
 import { Router } from 'express';
+import { HttpError, requestT } from '../../shared/i18n/server.ts';
+import { renderError } from '../../shared/i18n/index.ts';
 import { db } from '../db.ts';
 import { getInstance } from '../sync.ts';
 import { computeDrift, type DriftResult } from './drift.ts';
@@ -19,27 +21,19 @@ import { transformSnapshot } from './transform.ts';
 import { diffWorkflows } from '../../shared/diff.ts';
 import { loadSnapshot } from '../sync.ts';
 
-class HttpError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
 const num = (v: unknown) => {
   const n = Number(v);
-  if (!Number.isInteger(n)) throw new HttpError(400, 'Ungültige ID');
+  if (!Number.isInteger(n)) throw new HttpError(400, 'errors.http.invalidId');
   return n;
 };
 
 function pair(req: { params: Record<string, string> }) {
   const sourceId = num(req.params.sourceId);
   const targetId = num(req.params.targetId);
-  if (sourceId === targetId) throw new HttpError(400, 'Quelle und Ziel müssen unterschiedliche Instanzen sein');
+  if (sourceId === targetId) throw new HttpError(400, 'errors.promote.sameInstance');
   const source = getInstance(sourceId);
   const target = getInstance(targetId);
-  if (!source || !target) throw new HttpError(404, 'Instanz nicht gefunden');
+  if (!source || !target) throw new HttpError(404, 'errors.instance.notFound');
   return { sourceId, targetId, source, target };
 }
 
@@ -78,9 +72,10 @@ promoteRouter.get('/:sourceId/:targetId', (req, res) => {
 promoteRouter.get('/:sourceId/:targetId/suggestions', async (req, res) => {
   const { source, target } = pair(req);
   try {
-    res.json({ suggestions: await suggestMappings(source, target) });
+    const tr = requestT(req);
+    res.json({ suggestions: await suggestMappings(source, target, tr) });
   } catch (e) {
-    throw new HttpError(502, `Vorschläge fehlgeschlagen: ${(e as Error).message}`);
+    throw new HttpError(502, 'errors.promote.suggestionsFailed', { reason: renderError(e, requestT(req)) });
   }
 });
 
@@ -88,13 +83,13 @@ promoteRouter.put('/:sourceId/:targetId/mappings', (req, res) => {
   const { sourceId, targetId } = pair(req);
   const body = req.body ?? {};
   const kind = String(body.kind ?? '');
-  if (!MAPPING_KINDS.includes(kind as never)) throw new HttpError(400, 'Unbekannter Zuordnungstyp');
+  if (!MAPPING_KINDS.includes(kind as never)) throw new HttpError(400, 'errors.promote.unknownKind');
   const from = String(body.from ?? '').trim().slice(0, 500);
   const to = String(body.to ?? '').trim().slice(0, 500);
   const fromName = body.fromName ? String(body.fromName).slice(0, 300) : null;
   const toName = body.toName ? String(body.toName).slice(0, 300) : null;
-  if (!from || !to) throw new HttpError(400, 'Quelle und Ziel dürfen nicht leer sein');
-  if (kind === 'credential' && !toName) throw new HttpError(400, 'Credentials brauchen den Namen auf der Ziel-Instanz (n8n speichert ID und Name)');
+  if (!from || !to) throw new HttpError(400, 'errors.promote.emptyMapping');
+  if (kind === 'credential' && !toName) throw new HttpError(400, 'errors.promote.credentialNeedsName');
   upsertMapping(sourceId, targetId, { kind: kind as never, from, to, fromName, toName });
   res.json(overview(sourceId, targetId));
 });
@@ -103,8 +98,8 @@ promoteRouter.delete('/:sourceId/:targetId/mappings', (req, res) => {
   const { sourceId, targetId } = pair(req);
   const kind = String(req.query.kind ?? '');
   const from = String(req.query.from ?? '');
-  if (!MAPPING_KINDS.includes(kind as never) || !from) throw new HttpError(400, 'Zuordnung nicht eindeutig angegeben');
-  if (!deleteMapping(sourceId, targetId, kind, from)) throw new HttpError(404, 'Zuordnung nicht gefunden');
+  if (!MAPPING_KINDS.includes(kind as never) || !from) throw new HttpError(400, 'errors.promote.mappingAmbiguous');
+  if (!deleteMapping(sourceId, targetId, kind, from)) throw new HttpError(404, 'errors.promote.mappingNotFound');
   res.json(overview(sourceId, targetId));
 });
 
@@ -115,11 +110,11 @@ promoteRouter.get('/:sourceId/:targetId/diff/:workflowId', (req, res) => {
   const src = db
     .prepare('SELECT id, n8n_id, name FROM workflows WHERE id = ? AND instance_id = ?')
     .get(workflowId, sourceId) as { id: number; n8n_id: string; name: string } | undefined;
-  if (!src) throw new HttpError(404, 'Workflow gehört nicht zur Quell-Instanz');
+  if (!src) throw new HttpError(404, 'errors.promote.notInSource');
   const version = db
     .prepare('SELECT id, number FROM versions WHERE workflow_id = ? ORDER BY number DESC LIMIT 1')
     .get(workflowId) as { id: number; number: number } | undefined;
-  if (!version) throw new HttpError(404, 'Keine gesicherte Version');
+  if (!version) throw new HttpError(404, 'errors.promote.noVersion');
   const snap = loadSnapshot(version.id)!;
 
   const match = targetWorkflowFor(sourceId, targetId, src.n8n_id, src.name);
@@ -150,10 +145,10 @@ promoteRouter.post('/:sourceId/:targetId/promote', async (req, res) => {
     .map((v: unknown) => num(v))
     .filter((n: number) => Number.isInteger(n))
     .map((workflowId: number) => ({ workflowId }));
-  if (!items.length) throw new HttpError(400, 'Keine Workflows angegeben');
-  if (items.length > 200) throw new HttpError(400, 'Höchstens 200 Workflows pro Übernahme');
-  const results: PromoteOutcome[] = await promoteWorkflows(sourceId, targetId, items);
+  if (!items.length) throw new HttpError(400, 'errors.promote.noWorkflows');
+  if (items.length > 200) throw new HttpError(400, 'errors.promote.tooMany');
+  const results: PromoteOutcome[] = await promoteWorkflows(sourceId, targetId, items, requestT(req));
   const failed = results.filter((r) => r.error);
-  if (failed.length === results.length) throw new HttpError(502, failed[0]!.error!);
+  if (failed.length === results.length) throw new HttpError(502, { raw: failed[0]!.error! });
   res.json({ results, overview: overview(sourceId, targetId) });
 });

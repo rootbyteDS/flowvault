@@ -14,6 +14,8 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { db, DATA_DIR } from './db.ts';
 import { safeEqual } from './crypto.ts';
 import { clientFor, getInstance } from './sync.ts';
+import { HttpError, requestT } from '../shared/i18n/server.ts';
+import { packError } from '../shared/i18n/index.ts';
 
 export const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? 4100);
 export const HEALTH_URL = (process.env.HEALTH_URL ?? `http://127.0.0.1:${HEALTH_PORT}`).replace(/\/+$/, '');
@@ -31,12 +33,12 @@ export const INTERNAL_TOKEN = TOKEN;
 function requireToken(req: Request, res: Response, next: NextFunction) {
   const given = req.headers['x-internal-token'];
   if (typeof given === 'string' && safeEqual(given, TOKEN)) return next();
-  res.status(401).json({ error: 'Ungültiges internes Token' });
+  res.status(401).json({ error: requestT(req)('errors.http.internalToken') });
 }
 
 const id = (v: unknown) => {
   const n = Number(v);
-  if (!Number.isInteger(n)) throw Object.assign(new Error('Ungültige ID'), { status: 400 });
+  if (!Number.isInteger(n)) throw new HttpError(400, 'errors.http.invalidId');
   return n;
 };
 
@@ -93,7 +95,7 @@ internalRouter.get('/instances', (_req, res) => {
 /** Eine Seite Ausführungen einer Instanz, ohne Laufzeitdaten. */
 internalRouter.get('/instances/:id/executions', async (req, res) => {
   const inst = getInstance(id(req.params.id));
-  if (!inst) return void res.status(404).json({ error: 'Instanz nicht gefunden' });
+  if (!inst) return void res.status(404).json({ error: requestT(req)('errors.instance.notFound') });
   const includeData = req.query.includeData === 'true';
   const status = typeof req.query.status === 'string' && /^[a-z]+$/.test(req.query.status) ? req.query.status : undefined;
   const limit = Math.max(1, Math.min(includeData ? 100 : 250, Number(req.query.limit) || 100));
@@ -106,7 +108,8 @@ internalRouter.get('/instances/:id/executions', async (req, res) => {
     });
     res.json(page);
   } catch (e) {
-    res.status(502).json({ error: (e as Error).message });
+    // Der Health-Dienst speichert die Meldung – übersetzbar, damit sie in jeder Sprache lesbar bleibt
+    res.status(502).json({ error: packError(e) });
   }
 });
 
@@ -117,13 +120,13 @@ internalRouter.get('/instances/:id/timeline', (req, res) => {
 
 internalRouter.get('/workflows/:id/timeline', (req, res) => {
   const t = timelines('w.id = ?', id(req.params.id))[0];
-  if (!t) return void res.status(404).json({ error: 'Workflow nicht gefunden' });
+  if (!t) return void res.status(404).json({ error: requestT(req)('errors.workflow.notFound') });
   const inst = getInstance(t.instanceId);
   res.json({ ...t, instanceName: inst?.name ?? '' });
 });
 
-internalRouter.use((_req, res) => {
-  res.status(404).json({ error: 'Unbekannter interner Endpunkt' });
+internalRouter.use((req, res) => {
+  res.status(404).json({ error: requestT(req)('errors.http.unknownInternalEndpoint') });
 });
 
 /** Leitet /api/health/* an den Health-Dienst weiter. Muss nach requireAuth eingehängt werden. */
@@ -133,7 +136,7 @@ export async function healthProxy(req: Request, res: Response) {
   try {
     const r = await fetch(target, {
       method: req.method,
-      headers: { 'X-Internal-Token': TOKEN, Accept: 'application/json', ...(write ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { 'X-Internal-Token': TOKEN, Accept: 'application/json', 'Accept-Language': String(req.headers['accept-language'] ?? ''), ...(write ? { 'Content-Type': 'application/json' } : {}) },
       body: write ? JSON.stringify(req.body ?? {}) : undefined,
       redirect: 'manual',
       signal: AbortSignal.timeout(30_000),
@@ -141,6 +144,6 @@ export async function healthProxy(req: Request, res: Response) {
     const text = await r.text();
     res.status(r.status).type('application/json').send(text || '{}');
   } catch {
-    res.status(503).json({ error: 'Die Auswertung der Ausführungen antwortet gerade nicht', unavailable: true });
+    res.status(503).json({ error: requestT(req)('errors.http.healthUnavailable'), unavailable: true });
   }
 }

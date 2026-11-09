@@ -7,14 +7,10 @@
  */
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { LocalizedError } from '../shared/i18n/index.ts';
 
-export class FetchError extends Error {
-  status: number;
-  constructor(message: string, status = 0) {
-    super(message);
-    this.status = status;
-  }
-}
+/** Fehler eines ausgehenden Requests. Eigene Meldungen sind übersetzbar, wörtliche Antworten fremder Dienste nicht. */
+export class FetchError extends LocalizedError {}
 
 function isBlockedIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
@@ -35,9 +31,9 @@ function isBlockedIp(ip: string): boolean {
 }
 
 async function assertAllowedTarget(url: URL) {
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new FetchError('Nur http(s)-Adressen sind erlaubt');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new FetchError({ key: 'errors.net.onlyHttp' });
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  const blocked = 'Diese Adresse ist nicht erlaubt (link-lokal bzw. Cloud-Metadaten)';
+  const blocked = { key: 'errors.net.blocked' } as const;
   if (/^metadata(\.google\.internal)?\.?$/i.test(host)) throw new FetchError(blocked);
   let addrs: { address: string }[];
   try {
@@ -54,15 +50,12 @@ export async function safeFetch(url: string, init: RequestInit): Promise<Respons
   const res = await fetch(u, { ...init, redirect: 'manual' });
   if (res.status >= 300 && res.status < 400) {
     void res.body?.cancel();
-    let target = '';
+    let origin = '';
     try {
       const loc = res.headers.get('location');
-      if (loc) target = ` auf ${new URL(loc, u).origin}`;
+      if (loc) origin = new URL(loc, u).origin;
     } catch {}
-    throw new FetchError(
-      `Die Adresse leitet weiter${target} – bitte die Ziel-Adresse direkt eintragen. API-Keys werden aus Sicherheitsgründen nicht weitergeleitet.`,
-      res.status,
-    );
+    throw new FetchError(origin ? { key: 'errors.net.redirectTo', params: { origin } } : { key: 'errors.net.redirect' }, res.status);
   }
   return res;
 }

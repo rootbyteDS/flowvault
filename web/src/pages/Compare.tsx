@@ -1,11 +1,11 @@
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeftRight, ArrowRight } from 'lucide-react';
-import { describeSummary } from '../../../shared/diff.ts';
 import { useApi, type CompareResult, type WorkflowDetail } from '../api.ts';
 import { ChangeChips } from '../components/changes.tsx';
 import { DiffView } from '../components/DiffView.tsx';
 import { Button, Card, ErrorBox, PageHeader, PageLoader, inputCls } from '../components/ui.tsx';
-import { cx, formatDate, versionTitle } from '../util.ts';
+import { cx, describeSummary, formatDate, versionTitle } from '../util.ts';
+import { message, t } from '../i18n.tsx';
 
 export function Compare() {
   const [params, setParams] = useSearchParams();
@@ -21,7 +21,7 @@ export function Compare() {
     setParams(p, { replace: true });
   };
 
-  if (!to) return <ErrorBox>Keine Version zum Vergleichen angegeben</ErrorBox>;
+  if (!to) return <ErrorBox>{t('compare.missing')}</ErrorBox>;
   if (cmp.error) return <ErrorBox>{cmp.error}</ErrorBox>;
   if (!cmp.data) return <PageLoader />;
   const { diff } = cmp.data;
@@ -31,7 +31,7 @@ export function Compare() {
     <select className={cx(inputCls, 'font-mono text-[13px]')} value={value ?? ''} onChange={(e) => set(which, e.target.value)}>
       {versions.map((v) => (
         <option key={v.id} value={v.id}>
-          v{v.number} · {formatDate(v.created_at, true)} · {v.message || versionTitle(v)}
+          v{v.number} · {formatDate(v.created_at, true)} · {message(v.message) || versionTitle(v)}
         </option>
       ))}
     </select>
@@ -41,20 +41,20 @@ export function Compare() {
     <>
       <PageHeader
         eyebrow={<Link to={`/workflows/${cmp.data.to.workflow_id}`} className="hover:text-text">{cmp.data.to.workflow_name}</Link>}
-        title="Versionen vergleichen"
+        title={t('compare.title')}
         subtitle={<span className="flex items-center gap-2">{describeSummary(diff.summary)} <ChangeChips s={diff.summary} /></span>}
       />
 
       <Card className="mb-6 p-4">
         <div className="flex flex-col items-stretch gap-3 md:flex-row md:items-center">
           <div className="flex-1">
-            <div className="mb-2 flex items-center gap-2 text-[13px] text-muted"><span className="size-1.5 rounded-full bg-del" />Basis</div>
+            <div className="mb-2 flex items-center gap-2 text-[13px] text-muted"><span className="size-1.5 rounded-full bg-del" />{t('compare.base')}</div>
             <Picker which="from" value={cmp.data.from?.id} />
           </div>
           <Button
             variant="ghost"
             className="self-center md:mt-7"
-            title="Tauschen"
+            title={t('compare.swap')}
             icon={<ArrowLeftRight className="size-4" />}
             onClick={() => {
               if (!from) return;
@@ -65,20 +65,20 @@ export function Compare() {
             }}
           />
           <div className="flex-1">
-            <div className="mb-2 flex items-center gap-2 text-[13px] text-muted"><span className="size-1.5 rounded-full bg-add" />Vergleich</div>
+            <div className="mb-2 flex items-center gap-2 text-[13px] text-muted"><span className="size-1.5 rounded-full bg-add" />{t('compare.compared')}</div>
             <Picker which="to" value={cmp.data.to.id} />
           </div>
         </div>
         {cmp.data.from && cmp.data.from.number > cmp.data.to.number && (
           <div className="mt-3 text-xs text-mod">
-            Die Basis ist neuer als der Vergleich, Änderungen erscheinen deshalb rückwärts
+            {t('compare.reversed')}
           </div>
         )}
       </Card>
 
       {cmp.data.from?.id === cmp.data.to.id ? (
         <div className="rounded-lg border border-line px-4 py-10 text-center text-sm text-muted">
-          Beide Seiten zeigen dieselbe Version. <ArrowRight className="inline size-4" /> Wähle oben eine andere.
+          {t('compare.same')} <ArrowRight className="inline size-4 rtl:rotate-180" /> {t('compare.pickAnother')}
         </div>
       ) : (
         <DiffView from={cmp.data.from?.snapshot ?? null} to={cmp.data.to.snapshot} diff={diff} />

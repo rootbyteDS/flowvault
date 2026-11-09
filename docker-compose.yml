@@ -21,6 +21,8 @@ services:
       UPDATE_WEBHOOK_URL: ${UPDATE_WEBHOOK_URL:-}
       UPDATE_WEBHOOK_TOKEN: ${UPDATE_WEBHOOK_TOKEN:-}
       UPDATE_MANAGEMENT_URL: ${UPDATE_MANAGEMENT_URL:-}
+      # Optional: Sprache für Server-Logs und KI-Texte (de oder en). Leer = Deutsch.
+      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-}
       # Hinter einem Reverse Proxy (Caddy, Traefik, nginx) unbedingt setzen – sonst teilen sich
       # alle Nutzer die IP des Proxys und die Login-Sperre trifft alle gleichzeitig:
       # TRUST_PROXY: "1"

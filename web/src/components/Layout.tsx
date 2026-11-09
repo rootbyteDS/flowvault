@@ -5,6 +5,8 @@ import { api, useApi, type Instance } from '../api.ts';
 import type { SystemInfo } from '../../../shared/system.ts';
 import { StatusDot } from './ui.tsx';
 import { cx } from '../util.ts';
+import { t, type MessageKey } from '../i18n.tsx';
+import type { LucideIcon } from 'lucide-react';
 
 /** Wortmarke nach dem flown8tive-Prinzip: Name in Tinte, zweiter Teil in Kupfer. */
 export function Logo({ className }: { className?: string }) {
@@ -15,13 +17,13 @@ export function Logo({ className }: { className?: string }) {
   );
 }
 
-const NAV = [
-  { to: '/', label: 'Übersicht', icon: LayoutDashboard, end: true },
-  { to: '/workflows', label: 'Workflows', icon: Workflow },
-  { to: '/promote', label: 'Umgebungen', icon: ArrowRightLeft },
-  { to: '/instances', label: 'Instanzen', icon: Server },
-  { to: '/activity', label: 'Aktivität', icon: Activity },
-  { to: '/settings', label: 'Einstellungen', icon: Settings },
+const NAV: { to: string; label: MessageKey; icon: LucideIcon; end?: boolean }[] = [
+  { to: '/', label: 'nav.overview', icon: LayoutDashboard, end: true },
+  { to: '/workflows', label: 'nav.workflows', icon: Workflow },
+  { to: '/promote', label: 'nav.environments', icon: ArrowRightLeft },
+  { to: '/instances', label: 'nav.instances', icon: Server },
+  { to: '/activity', label: 'nav.activity', icon: Activity },
+  { to: '/settings', label: 'nav.settings', icon: Settings },
 ];
 
 const rowCls = (active: boolean) =>
@@ -46,12 +48,12 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
         {NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => rowCls(isActive)}>
             <n.icon className="size-4 shrink-0" />
-            {n.label}
+            {t(n.label)}
           </NavLink>
         ))}
       </nav>
 
-      <div className="mt-6 mb-2 px-5 text-xs text-dim">Instanzen</div>
+      <div className="mt-6 mb-2 px-5 text-xs text-dim">{t('nav.instancesHeading')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3">
         {instances?.map((i) => (
           <NavLink key={i.id} to={`/instances/${i.id}`} className={({ isActive }) => rowCls(isActive)}>
@@ -62,12 +64,12 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
             <StatusDot ok={i.last_sync_ok} syncing={i.syncing} />
           </NavLink>
         ))}
-        {instances?.length === 0 && <div className="px-2.5 text-[13px] text-dim">Noch keine verbunden</div>}
+        {instances?.length === 0 && <div className="px-2.5 text-[13px] text-dim">{t('nav.noInstances')}</div>}
       </div>
 
       <div className="border-t border-line p-3">
-        <Link to="/settings#system" className="mb-2 flex items-center justify-between gap-2 px-2.5 py-1 text-xs text-dim hover:text-muted" title="Versionsinformationen und Updates anzeigen">
-          <span>FlowVault {system.data ? `v${system.data.version}` : system.error ? 'Version unbekannt' : 'Version …'}</span>
+        <Link to="/settings#system" className="mb-2 flex items-center justify-between gap-2 px-2.5 py-1 text-xs text-dim hover:text-muted" title={t('nav.versionTitle')}>
+          <span>FlowVault {system.data ? `v${system.data.version}` : system.error ? t('nav.versionUnknown') : t('nav.versionLoading')}</span>
           {system.data?.revision && <span className="font-mono">{system.data.revision.slice(0, 8)}{system.data.modified ? '*' : ''}</span>}
         </Link>
         <button
@@ -78,7 +80,7 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
           className={cx(rowCls(false), 'w-full')}
         >
           <LogOut className="size-4 shrink-0" />
-          Abmelden
+          {t('nav.logout')}
         </button>
       </div>
     </div>
@@ -99,7 +101,7 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b border-line px-4 lg:hidden">
           <Logo />
-          <button onClick={() => setOpen((o) => !o)} className="rounded-md p-2 text-muted hover:bg-panel-3" aria-label="Menü">
+          <button onClick={() => setOpen((o) => !o)} className="rounded-md p-2 text-muted hover:bg-panel-3" aria-label={t('nav.menu')}>
             {open ? <X className="size-5" /> : <Menu className="size-5" />}
           </button>
         </header>

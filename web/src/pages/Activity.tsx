@@ -3,14 +3,15 @@ import { Activity } from 'lucide-react';
 import { api, useApi, type ActivityItem } from '../api.ts';
 import { ActivityRow } from '../components/changes.tsx';
 import { Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader } from '../components/ui.tsx';
+import { intlLocale, t } from '../i18n.tsx';
 
 function dayLabel(ts: number) {
   const d = new Date(ts);
   const today = new Date();
   const y = new Date(Date.now() - 864e5);
-  if (d.toDateString() === today.toDateString()) return 'Heute';
-  if (d.toDateString() === y.toDateString()) return 'Gestern';
-  return d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  if (d.toDateString() === today.toDateString()) return t('activity.today');
+  if (d.toDateString() === y.toDateString()) return t('activity.yesterday');
+  return d.toLocaleDateString(intlLocale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 export function ActivityPage() {
@@ -40,9 +41,9 @@ export function ActivityPage() {
 
   return (
     <>
-      <PageHeader title="Aktivität" subtitle="Jede gesicherte Änderung, neueste zuerst" />
+      <PageHeader title={t('nav.activity')} subtitle={t('activity.subtitle')} />
       {items.length === 0 ? (
-        <Card><EmptyState icon={<Activity className="size-6" />} title="Noch keine Aktivität" /></Card>
+        <Card><EmptyState icon={<Activity className="size-6" />} title={t('activity.empty')} /></Card>
       ) : (
         <div className="space-y-6">
           {groups.map((g) => (
@@ -59,7 +60,7 @@ export function ActivityPage() {
           ))}
           {!done && first.data!.length >= 60 && (
             <div className="flex justify-center">
-              <Button loading={busy} onClick={loadMore}>Ältere laden</Button>
+              <Button loading={busy} onClick={loadMore}>{t('activity.loadOlder')}</Button>
             </div>
           )}
         </div>

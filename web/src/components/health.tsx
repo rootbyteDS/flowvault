@@ -11,10 +11,15 @@ import { api, useApi, type FailingNode, type HealthAlert, type HealthSettings, t
 import { RestoreModal } from './RestoreModal.tsx';
 import { Button, Card, InfoTip, useToast } from './ui.tsx';
 import { cx, timeAgo } from '../util.ts';
+import { message, paragraphs, rich, t } from '../i18n.tsx';
+import { unpackMessage } from '../../../shared/i18n/index.ts';
 
 export const pct = (r: number | null | undefined) => (r === null || r === undefined ? '–' : `${Math.round(r * 100)} %`);
-const runs = (n: number) => `${n} ${n === 1 ? 'Lauf' : 'Läufe'}`;
-const versionRange = (b: NonNullable<VersionHealth['baseline']>) => (b.fromNumber === b.toNumber ? `v${b.toNumber}` : `v${b.fromNumber} bis v${b.toNumber}`);
+const runs = (n: number) => t('health.runs', { count: n });
+const versionRange = (b: NonNullable<VersionHealth['baseline']>) =>
+  b.fromNumber === b.toNumber ? t('health.range.single', { to: b.toNumber }) : t('health.range.span', { from: b.fromNumber, to: b.toNumber });
+/** Kleine Hervorhebung im Fließtext (Tag `<h>`). */
+const em = (c: string) => <span className="text-text">{c}</span>;
 
 export const SETTINGS_LINK = '/settings#fehlerquote';
 
@@ -22,11 +27,14 @@ export const SETTINGS_LINK = '/settings#fehlerquote';
 
 /** Übersetzt typische Abruffehler in einen Satz, mit dem man etwas anfangen kann. */
 export function explainPollError(msg: string): { title: string; fix?: string } {
-  if (/\b401\b|ungültig oder abgelaufen/i.test(msg)) return { title: 'Der API-Key wird von n8n abgelehnt', fix: 'Trag bei der Instanz einen gültigen API-Key ein.' };
-  if (/\b403\b|forbidden|scope/i.test(msg))
-    return { title: 'Der API-Key darf keine Ausführungen lesen', fix: 'Erstelle in n8n unter Settings → n8n API einen Key mit Lesezugriff auf Executions und trag ihn bei der Instanz ein.' };
-  if (/nicht erreichbar|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|timeout/i.test(msg)) return { title: 'Die n8n-Instanz ist nicht erreichbar', fix: 'Läuft n8n und stimmt die URL? Der nächste Abruf versucht es automatisch erneut.' };
-  return { title: msg };
+  // Neue Meldungen kommen als Schlüssel vom Server; ältere (und wörtliche von n8n) als Text
+  const key = unpackMessage(msg)?.key;
+  if (key === 'errors.n8n.keyInvalid' || /\b401\b|ungültig oder abgelaufen|invalid or expired/i.test(msg))
+    return { title: t('health.pollError.unauthorized'), fix: t('health.pollError.unauthorizedFix') };
+  if (/\b403\b|forbidden|scope/i.test(msg)) return { title: t('health.pollError.forbidden'), fix: t('health.pollError.forbiddenFix') };
+  if (key === 'errors.n8n.unreachable' || /nicht erreichbar|not reachable|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|timeout/i.test(msg))
+    return { title: t('health.pollError.unreachable'), fix: t('health.pollError.unreachableFix') };
+  return { title: message(msg) };
 }
 
 /** Die drei Schritte in einem Satz pro Schritt, mit den tatsächlichen Einstellungen. */
@@ -34,23 +42,18 @@ export function HowItWorks({ s }: { s: HealthSettings }) {
   const steps: { icon: typeof Activity; title: string; text: ReactNode }[] = [
     {
       icon: Activity,
-      title: 'Ausführungen abholen',
-      text: <>Alle {s.pollMinutes} Min. fragt FlowVault bei n8n nach neuen Ausführungen. Gespeichert werden nur Status, Zeit und bei Fehlern der Node mit Meldung. Ein- und Ausgabedaten nie.</>,
+      title: t('health.steps.fetch'),
+      text: t('health.steps.fetchText', { minutes: s.pollMinutes }),
     },
     {
       icon: GitBranch,
-      title: 'Der Version zuordnen',
-      text: <>Jede Ausführung zählt für die Version, die zu dem Zeitpunkt in n8n gespeichert war. So hat jede Version ihre eigene Fehlerquote.</>,
+      title: t('health.steps.assign'),
+      text: t('health.steps.assignText'),
     },
     {
       icon: Scale,
-      title: 'Mit vorher vergleichen',
-      text: (
-        <>
-          Hat eine neue Version mindestens {runs(s.minRuns)} und liegt ihre Fehlerquote {s.thresholdPct} Prozentpunkte oder mehr über den Versionen davor,
-          {s.alerts ? ' warnt FlowVault und schlägt die letzte stabile Version vor.' : ' wird sie markiert. Warnungen sind gerade aus.'} Zurückgesetzt wird nur auf deinen Klick.
-        </>
-      ),
+      title: t('health.steps.compare'),
+      text: t(s.alerts ? 'health.steps.compareOn' : 'health.steps.compareOff', { runs: runs(s.minRuns), threshold: s.thresholdPct }),
     },
   ];
   return (
@@ -69,7 +72,7 @@ export function HowItWorks({ s }: { s: HealthSettings }) {
 }
 
 /** Aufklappbare Erklärung unter einer Zahl, damit die Zahl selbst ruhig bleiben kann. */
-function Explainer({ label = 'Wie wird das berechnet?', children }: { label?: string; children: ReactNode }) {
+function Explainer({ label = t('health.explainer.label'), children }: { label?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-3">
@@ -86,23 +89,19 @@ function CalcExplainer({ h, wh }: { h: VersionHealth; wh: WorkflowHealth }) {
   const s = wh.settings;
   return (
     <Explainer>
+      <p>{rich(s.includeManual ? 'health.explainer.rateWithManual' : 'health.explainer.rateWithoutManual', { h: em })}</p>
       <p>
-        <span className="text-text">Fehlerquote</span> = gescheiterte Läufe ÷ abgeschlossene Läufe dieser Version
-        {s.includeManual ? '' : ', ohne Testläufe aus dem Editor'}. Abgebrochene und noch laufende Ausführungen zählen nicht.
+        {rich('health.explainer.compare', { h: em }, {
+          runs: runs(s.minRuns), threshold: s.thresholdPct, from: Math.min(5, 100 - s.thresholdPct), to: Math.min(5, 100 - s.thresholdPct) + s.thresholdPct,
+        })}
       </p>
-      <p>
-        <span className="text-text">Vergleich</span>: die bis zu fünf Versionen davor zusammen, bis mindestens {runs(s.minRuns)} beisammen sind. Gewarnt wird ab{' '}
-        {s.thresholdPct} Prozentpunkten Anstieg, z. B. von {Math.min(5, 100 - s.thresholdPct)} % auf {Math.min(5, 100 - s.thresholdPct) + s.thresholdPct} %.
-      </p>
-      <p>
-        <span className="text-text">Zuordnung</span>: nach dem Speicherzeitpunkt in n8n. Speicherst du zwischen zwei Sicherungen mehrmals, zählen die Läufe dazwischen zur vorherigen gesicherten Version.
-      </p>
+      <p>{rich('health.explainer.assign', { h: em })}</p>
       {wh.unattributed > 0 && h.number === Math.min(...wh.versions.map((v) => v.number)) && (
-        <p>{runs(wh.unattributed)} fanden vor der ersten Sicherung statt und gehören zu keiner Version.</p>
+        <p>{t('health.explainer.unattributed', { count: wh.unattributed })}</p>
       )}
       <p>
-        Zuletzt abgerufen {timeAgo(wh.lastPollAt)}.{' '}
-        <Link to={SETTINGS_LINK} className="underline decoration-line-2 underline-offset-2 hover:text-text">Schwellenwerte ändern</Link>
+        {t('health.explainer.lastPoll', { when: timeAgo(wh.lastPollAt) })}{' '}
+        <Link to={SETTINGS_LINK} className="underline decoration-line-2 underline-offset-2 hover:text-text">{t('health.explainer.changeThresholds')}</Link>
       </p>
     </Explainer>
   );
@@ -115,14 +114,14 @@ export function HealthPill({ h, minRuns }: { h?: VersionHealth; minRuns?: number
   if (!h || !h.total) return null;
   const early = minRuns !== undefined && h.total < minRuns;
   const tone = h.regression ? 'text-del' : h.failed ? 'text-mod' : 'text-dim';
-  const tip = `${h.failed} von ${runs(h.total)} mit dieser Version fehlgeschlagen${early ? ` (vorläufig, bewertet wird ab ${minRuns})` : ''}${h.regression ? '. Deutlich mehr als vorher.' : ''}`;
+  const tip = `${t('health.pill.tip', { count: h.total, failed: h.failed, total: h.total })}${early ? t('health.pill.early', { min: minRuns }) : ''}${h.regression ? t('health.pill.regression') : ''}`;
   return (
     <span className={cx('inline-flex items-center gap-1.5 font-mono text-xs', tone)} title={tip}>
       {h.regression && <AlertTriangle className="size-3.5" />}
-      {pct(h.rate)} Fehler
+      {t('health.pill.errors', { rate: pct(h.rate) })}
       <span className="text-dim">
         · {runs(h.total)}
-        {early && ' · vorläufig'}
+        {early && ` · ${t('health.pill.provisional')}`}
       </span>
     </span>
   );
@@ -135,31 +134,24 @@ function NodeList({ nodes }: { nodes: FailingNode[] }) {
   return (
     <div className="mt-4">
       <div className="flex items-center gap-1.5 text-xs text-dim">
-        Wo es scheitert
-        <InfoTip label="Wo es scheitert">
-          <p>Der Node, an dem die Ausführung abgebrochen ist, mit der letzten Fehlermeldung aus n8n. Die Prozentzahl bezieht sich auf alle Läufe dieser Version.</p>
-          <p>Details holt FlowVault für höchstens 200 Fehler pro Abruf. Bei sehr vielen Fehlern können die Zahlen pro Node daher etwas niedriger sein als die Gesamtquote.</p>
-        </InfoTip>
+        {t('health.nodes.where')}
+        <InfoTip label={t('health.nodes.where')}>{paragraphs('health.nodes.whereTip')}</InfoTip>
       </div>
       <ul className="mt-2 space-y-2.5">
         {nodes.slice(0, 4).map((n) => (
           <li key={n.name} className="text-sm">
-            <span className="font-medium">„{n.name}“</span>
-            <span className="text-muted"> in {pct(n.rate)} der Läufe ({n.failed}×)</span>
+            {rich('health.nodes.line', { n: (c) => <span className="font-medium">{c}</span>, m: (c) => <span className="text-muted">{c}</span> }, { name: n.name, rate: pct(n.rate), failed: n.failed })}
             {n.isNew && (
               <span className="ml-2 inline-flex items-center gap-1 rounded bg-del/12 px-1.5 py-0.5 text-xs text-del">
-                neu seit dieser Version
-                <InfoTip label="neu seit dieser Version" className="text-del/70 hover:text-del">
-                  <p>In den Versionen davor ist dieser Node fast nie gescheitert, in höchstens 2 % der Läufe.</p>
-                  <p>Ein starker Hinweis, dass die Änderung in dieser Version die Ursache ist. Schau dir im Tab „Änderungen“ an, was an diesem Node anders ist.</p>
-                </InfoTip>
+                {t('health.nodes.isNew')}
+                <InfoTip label={t('health.nodes.isNew')} className="text-del/70 hover:text-del">{paragraphs('health.nodes.isNewTip')}</InfoTip>
               </span>
             )}
             {n.lastMessage && <div className="mt-0.5 truncate font-mono text-xs text-dim" title={n.lastMessage}>{n.lastMessage}</div>}
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs text-dim">Auf dem Canvas sind diese Nodes rot umrandet.</p>
+      <p className="mt-2 text-xs text-dim">{t('health.nodes.canvas')}</p>
     </div>
   );
 }
@@ -198,8 +190,8 @@ export function VersionHealthPanel({ h, wh, unavailable, workflowActive, onRollb
 }) {
   if (unavailable) {
     return (
-      <Notice icon={Info} hint={<>FlowVault startet die Auswertung automatisch neu. Versionen, Vergleich und Wiederherstellen funktionieren weiter.</>}>
-        Fehlerquote gerade nicht verfügbar
+      <Notice icon={Info} hint={t('health.panel.unavailableHint')}>
+        {t('health.panel.unavailable')}
       </Notice>
     );
   }
@@ -207,29 +199,29 @@ export function VersionHealthPanel({ h, wh, unavailable, workflowActive, onRollb
   const s = wh.settings;
 
   if (!s.enabled) {
-    return <Notice icon={Activity} hint={<>Zeigt pro Version, wie oft der Workflow in n8n gescheitert ist. {settingsLink('Einschalten')}</>}>Fehlerquote pro Version ist ausgeschaltet</Notice>;
+    return <Notice icon={Activity} hint={rich('health.panel.disabledHint', { link: settingsLink })}>{t('health.panel.disabled')}</Notice>;
   }
   if (wh.pollError) {
     const e = explainPollError(wh.pollError);
     return (
-      <Notice icon={AlertTriangle} tone="del" hint={<>{e.fix} {wh.lastPollAt ? `Letzter erfolgreicher Stand ${timeAgo(wh.lastPollAt)}.` : ''}</>}>
-        Ausführungen konnten nicht abgerufen werden: {e.title}
+      <Notice icon={AlertTriangle} tone="del" hint={<>{e.fix} {wh.lastPollAt ? t('health.panel.lastGood', { when: timeAgo(wh.lastPollAt) }) : ''}</>}>
+        {t('health.panel.pollFailed', { reason: e.title })}
       </Notice>
     );
   }
   if (!wh.lastPollAt) {
-    return <Notice icon={Hourglass} hint="Das dauert meist unter einer Minute. Die Seite aktualisiert sich von selbst.">FlowVault holt gerade zum ersten Mal die Ausführungen aus n8n</Notice>;
+    return <Notice icon={Hourglass} hint={t('health.panel.firstPollHint')}>{t('health.panel.firstPoll')}</Notice>;
   }
 
   if (!h.total) {
     const why = [
-      !workflowActive && !h.to ? 'Der Workflow ist in n8n nicht aktiv.' : null,
-      !s.includeManual ? 'Testläufe aus dem Editor zählen nicht mit.' : null,
-      `Abgerufen werden Ausführungen der letzten ${s.lookbackDays} Tage, sofern n8n sie noch hat.`,
+      !workflowActive && !h.to ? t('health.panel.whyInactive') : null,
+      !s.includeManual ? t('health.panel.whyManual') : null,
+      t('health.panel.whyLookback', { days: s.lookbackDays }),
     ].filter(Boolean);
     return (
       <Notice icon={Activity} hint={why.join(' ')}>
-        {h.to ? `Solange v${h.number} aktuell war, gab es keine gezählten Läufe` : `Mit v${h.number} gab es noch keine gezählten Läufe`}
+        {t(h.to ? 'health.panel.noRunsPast' : 'health.panel.noRunsYet', { number: h.number })}
       </Notice>
     );
   }
@@ -243,26 +235,20 @@ export function VersionHealthPanel({ h, wh, unavailable, workflowActive, onRollb
   else if (early)
     verdict = (
       <>
-        Vorläufig: erst {h.total} von {s.minRuns} Läufen. Ab {s.minRuns} vergleicht FlowVault mit den Versionen davor.{' '}
-        <InfoTip label="Vorläufig">
-          <p>Bei wenigen Läufen schwankt die Quote stark: Ein Fehler bei 2 Läufen sind schon 50 %.</p>
-          <p>Deshalb gibt es erst ab {runs(s.minRuns)} eine Bewertung und eine mögliche Warnung. Die Grenze stellst du in den Einstellungen ein.</p>
-        </InfoTip>
+        {t('health.panel.provisional', { total: h.total, min: s.minRuns })}{' '}
+        <InfoTip label={t('health.panel.provisionalLabel')}>{paragraphs('health.panel.provisionalTip', { runs: runs(s.minRuns) })}</InfoTip>
       </>
     );
   else if (noBase)
     verdict = (
       <>
-        Kein Vergleich möglich: Vor v{h.number} gab es zu wenige gezählte Läufe.{' '}
-        <InfoTip label="Kein Vergleich möglich">
-          <p>Für einen Vergleich brauchen auch die Versionen davor zusammen mindestens {runs(s.minRuns)}.</p>
-          <p>Das passiert bei der ersten Version, bei selten laufenden Workflows oder wenn n8n ältere Ausführungen schon gelöscht hat.</p>
-        </InfoTip>
+        {t('health.panel.noBase', { number: h.number })}{' '}
+        <InfoTip label={t('health.panel.noBaseLabel')}>{paragraphs('health.panel.noBaseTip', { runs: runs(s.minRuns) })}</InfoTip>
       </>
     );
-  else if (delta !== null && delta <= -0.05) verdict = <span className="inline-flex items-center gap-1.5"><TrendingDown className="size-3.5 text-add" />Weniger Fehler als vorher.</span>;
-  else if (delta !== null && delta >= 0.05) verdict = <>Etwas mehr Fehler als vorher, aber unter der Warnschwelle von {s.thresholdPct} Prozentpunkten.</>;
-  else verdict = <span className="inline-flex items-center gap-1.5"><CircleCheck className="size-3.5 text-add" />Unauffällig, ungefähr wie vorher.</span>;
+  else if (delta !== null && delta <= -0.05) verdict = <span className="inline-flex items-center gap-1.5"><TrendingDown className="size-3.5 text-add" />{t('health.panel.fewer')}</span>;
+  else if (delta !== null && delta >= 0.05) verdict = <>{t('health.panel.slightlyMore', { threshold: s.thresholdPct })}</>;
+  else verdict = <span className="inline-flex items-center gap-1.5"><CircleCheck className="size-3.5 text-add" />{t('health.panel.same')}</span>;
 
   return (
     <div className={cx('mt-4', h.regression ? 'rounded-lg border border-del/30 bg-del/8 px-4 py-3' : 'border-t border-line pt-4')}>
@@ -272,51 +258,43 @@ export function VersionHealthPanel({ h, wh, unavailable, workflowActive, onRollb
           <div className="min-w-0">
             <div>
               {h.regression ? (
-                <span className="font-medium text-del">Seit v{h.number} schlagen {pct(h.rate)} der Läufe fehl</span>
+                <span className="font-medium text-del">{t('health.panel.since', { number: h.number, rate: pct(h.rate) })}</span>
               ) : (
-                <span className={h.failed ? 'text-text' : 'text-muted'}>{pct(h.rate)} der Läufe fehlgeschlagen</span>
+                <span className={h.failed ? 'text-text' : 'text-muted'}>{t('health.panel.failedShare', { rate: pct(h.rate) })}</span>
               )}{' '}
-              <InfoTip label="Fehlerquote">
-                <p><b>Fehlerquote</b> = gescheiterte ÷ abgeschlossene Läufe, solange diese Version in n8n aktuell war.</p>
-                <p>
-                  {s.includeManual ? 'Testläufe aus dem Editor zählen mit.' : 'Testläufe aus dem Editor zählen nicht mit.'} Abgebrochene und noch laufende Ausführungen
-                  zählen nicht.
-                </p>
+              <InfoTip label={t('health.panel.rateLabel')}>
+                {paragraphs('health.panel.rateTip', { manual: t(s.includeManual ? 'health.panel.manualCounted' : 'health.panel.manualNotCounted') })}
               </InfoTip>
               {h.baseline && !early && (
                 <span className="text-muted">
-                  , vorher {pct(h.baseline.rate)} ({versionRange(h.baseline)}){' '}
-                  <InfoTip label="Vergleich mit vorher">
-                    <p><b>Vergleichsbasis</b>: die Versionen direkt davor, zusammengenommen, bis mindestens {runs(s.minRuns)} beisammen sind. Höchstens fünf Versionen zurück.</p>
-                    <p>Hier: {versionRange(h.baseline)} mit {runs(h.baseline.total)}, davon {h.baseline.failed} gescheitert.</p>
+                  {t('health.panel.before', { rate: pct(h.baseline.rate), range: versionRange(h.baseline) })}{' '}
+                  <InfoTip label={t('health.panel.beforeLabel')}>
+                    {paragraphs('health.panel.beforeTip', { runs: runs(s.minRuns), range: versionRange(h.baseline), total: runs(h.baseline.total), failed: h.baseline.failed })}
                   </InfoTip>
                 </span>
               )}
               <span className="ml-2 font-mono text-xs text-dim">
-                {h.failed}/{runs(h.total)}
-                {h.canceled ? ` · ${h.canceled} abgebrochen` : ''}
+                {t('health.panel.counts', { failed: h.failed, runs: runs(h.total) })}
+                {h.canceled ? t('health.panel.canceledSuffix', { count: h.canceled }) : ''}
               </span>
               {h.canceled > 0 && (
-                <InfoTip label="abgebrochen" className="ml-1">
-                  <p>Von Hand gestoppte Ausführungen. Sie zählen weder als Erfolg noch als Fehler.</p>
+                <InfoTip label={t('health.panel.canceledLabel')} className="ml-1">
+                  <p>{t('health.panel.canceledTip')}</p>
                 </InfoTip>
               )}
             </div>
             {verdict && <div className="mt-1 text-[13px] text-muted">{verdict}</div>}
             {h.regression && h.rollback && (
               <div className="mt-1 text-[13px] text-muted">
-                v{h.rollback.number} ist die letzte Version, die stabil lief ({pct(h.rollback.rate)} Fehler). Zurücksetzen spielt sie in n8n ein, der jetzige Stand bleibt hier gesichert.{' '}
-                <InfoTip label="Rollback-Vorschlag">
-                  <p>FlowVault sucht rückwärts die jüngste Version, deren Fehlerquote nah an der Zeit vor der Änderung lag.</p>
-                  <p>Beim Klick siehst du vorher noch einmal, was passiert: überschreiben oder als Kopie anlegen. Danach entsteht eine neue Version, die Historie bleibt komplett.</p>
-                </InfoTip>
+                {t('health.panel.rollbackHint', { number: h.rollback.number, rate: pct(h.rollback.rate) })}{' '}
+                <InfoTip label={t('health.panel.rollbackLabel')}>{paragraphs('health.panel.rollbackTip')}</InfoTip>
               </div>
             )}
           </div>
         </div>
         {h.rollback && (
           <Button size="sm" variant="primary" icon={<RotateCcw className="size-4" />} onClick={() => onRollback(h.rollback!.versionId, h.rollback!.number)}>
-            Auf v{h.rollback.number} zurücksetzen
+            {t('health.panel.rollbackButton', { number: h.rollback.number })}
           </Button>
         )}
       </div>
@@ -328,7 +306,7 @@ export function VersionHealthPanel({ h, wh, unavailable, workflowActive, onRollb
 
 // ───────────────────────── Warnungen ─────────────────────────
 
-const DISMISS_TIP = 'Blendet die Warnung für diese Version aus. Steigt die Fehlerquote einer späteren Version, warnt FlowVault erneut.';
+const dismissTip = () => t('health.alert.dismissTip');
 
 /** Warnung oben auf der Workflow-Seite, wenn die aktuelle Version auffällig ist. */
 export function AlertBanner({ alert, settings, onShow, onRollback, onDismissed }: {
@@ -347,36 +325,36 @@ export function AlertBanner({ alert, settings, onShow, onRollback, onDismissed }
           <AlertTriangle className="mt-0.5 size-5 shrink-0 text-del" />
           <div className="min-w-0">
             <div className="font-medium">
-              Seit der Änderung in v{alert.versionNumber} scheitert dieser Workflow deutlich öfter{' '}
-              <InfoTip label="Warum diese Warnung?">
+              {t('health.alert.title', { number: alert.versionNumber })}{' '}
+              <InfoTip label={t('health.alert.whyLabel')}>
                 <p>
-                  FlowVault vergleicht die Fehlerquote der aktuellen Version mit den Versionen davor.
-                  {settings && <> Liegt sie nach mindestens {runs(settings.minRuns)} um {settings.thresholdPct} Prozentpunkte oder mehr darüber, erscheint diese Warnung.</>}
+                  {t('health.alert.why1')}
+                  {settings && ` ${t('health.alert.whyDetail', { runs: runs(settings.minRuns), threshold: settings.thresholdPct })}`}
                 </p>
-                <p>Die Warnung verschwindet von selbst, sobald eine neuere Version wieder normal läuft oder du zurücksetzt.</p>
-                <p><Link to={SETTINGS_LINK} className="underline underline-offset-2 hover:text-text">Schwellenwerte ändern</Link></p>
+                <p>{t('health.alert.why2')}</p>
+                <p><Link to={SETTINGS_LINK} className="underline underline-offset-2 hover:text-text">{t('health.explainer.changeThresholds')}</Link></p>
               </InfoTip>
             </div>
             <div className="mt-1 text-sm text-muted">
-              {pct(alert.rate)} der Läufe schlagen fehl ({alert.failed} von {alert.total}), vorher waren es {pct(alert.baselineRate)}
-              {node ? <>. Meist scheitert „{node.name}“</> : null}. Erkannt {timeAgo(alert.createdAt)}.
+              {t(node ? 'health.alert.bodyNode' : 'health.alert.body', {
+                rate: pct(alert.rate), failed: alert.failed, total: alert.total, baseline: pct(alert.baselineRate), name: node?.name ?? '', when: timeAgo(alert.createdAt),
+              })}
             </div>
             <div className="mt-2 text-[13px] text-dim">
-              Sieh dir an, was sich in v{alert.versionNumber} geändert hat.
-              {alert.rollbackNumber ? ` Wenn es eilt: v${alert.rollbackNumber} lief zuletzt stabil.` : ''}
+              {t(alert.rollbackNumber ? 'health.alert.lookUrgent' : 'health.alert.look', { number: alert.versionNumber, rollback: alert.rollbackNumber ?? '' })}
             </div>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" icon={<EyeOff className="size-4" />} title={DISMISS_TIP} onClick={async () => {
+          <Button size="sm" variant="ghost" icon={<EyeOff className="size-4" />} title={dismissTip()} onClick={async () => {
             await api(`/health/alerts/${alert.id}/dismiss`, { method: 'POST' });
-            toast(`Warnung für v${alert.versionNumber} ausgeblendet`);
+            toast(t('health.alert.dismissedVersion', { number: alert.versionNumber }));
             onDismissed();
-          }}>Ausblenden</Button>
-          <Button size="sm" onClick={onShow}>Änderung ansehen</Button>
+          }}>{t('health.alert.dismiss')}</Button>
+          <Button size="sm" onClick={onShow}>{t('health.alert.viewChange')}</Button>
           {alert.rollbackVersionId && (
             <Button size="sm" variant="primary" icon={<RotateCcw className="size-4" />} onClick={() => onRollback(alert.rollbackVersionId!, alert.rollbackNumber!)}>
-              Auf v{alert.rollbackNumber} zurücksetzen
+              {t('health.panel.rollbackButton', { number: alert.rollbackNumber! })}
             </Button>
           )}
         </div>
@@ -399,11 +377,11 @@ export function AlertsCard() {
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="flex items-center gap-2 text-sm font-medium">
             <AlertTriangle className="size-4 text-del" />
-            {list.length === 1 ? 'Ein Workflow scheitert seit einer Änderung öfter' : `${list.length} Workflows scheitern seit einer Änderung öfter`}
+            {t('health.alert.cardTitle', { count: list.length })}
           </h2>
-          <Link to={SETTINGS_LINK} className="shrink-0 text-xs text-dim transition-colors hover:text-text">Wie wird das erkannt?</Link>
+          <Link to={SETTINGS_LINK} className="shrink-0 text-xs text-dim transition-colors hover:text-text">{t('health.alert.howDetected')}</Link>
         </div>
-        <p className="mt-1 text-[13px] text-muted">Die Fehlerquote der aktuellen Version liegt deutlich über der vorherigen. Öffne den Workflow, um die Änderung zu sehen.</p>
+        <p className="mt-1 text-[13px] text-muted">{t('health.alert.cardText')}</p>
       </div>
       <div className="divide-y divide-line">
         {list.map((a) => (
@@ -411,19 +389,19 @@ export function AlertsCard() {
             <Link to={`/workflows/${a.workflowId}?v=${a.versionId}`} className="min-w-0 flex-1 hover:text-text">
               <div className="truncate text-sm font-medium">{a.workflowName}</div>
               <div className="mt-0.5 truncate text-[13px] text-muted">
-                {a.instanceName} · seit v{a.versionNumber}: <span className="text-del">{pct(a.rate)}</span> Fehler statt {pct(a.baselineRate)}
-                {a.failingNodes[0] && <> · meist „{a.failingNodes[0].name}“</>}
+                {rich('health.alert.row', { r: (c) => <span className="text-del">{c}</span> }, { instance: a.instanceName, number: a.versionNumber, rate: pct(a.rate), baseline: pct(a.baselineRate) })}
+                {a.failingNodes[0] && t('health.alert.rowNode', { name: a.failingNodes[0].name })}
               </div>
             </Link>
             <div className="flex gap-2">
-              <Button size="sm" variant="ghost" title={DISMISS_TIP} onClick={async () => {
+              <Button size="sm" variant="ghost" title={dismissTip()} onClick={async () => {
                 await api(`/health/alerts/${a.id}/dismiss`, { method: 'POST' });
-                toast('Warnung ausgeblendet');
+                toast(t('health.alert.dismissed'));
                 alerts.reload();
-              }}>Ausblenden</Button>
+              }}>{t('health.alert.dismiss')}</Button>
               {a.rollbackVersionId && (
-                <Button size="sm" icon={<RotateCcw className="size-4" />} title={`v${a.rollbackNumber} lief zuletzt stabil`} onClick={() => setRollback({ alert: a })}>
-                  Auf v{a.rollbackNumber} zurücksetzen
+                <Button size="sm" icon={<RotateCcw className="size-4" />} title={t('health.alert.rollbackTitle', { number: a.rollbackNumber! })} onClick={() => setRollback({ alert: a })}>
+                  {t('health.panel.rollbackButton', { number: a.rollbackNumber! })}
                 </Button>
               )}
             </div>

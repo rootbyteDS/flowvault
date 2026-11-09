@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR } from './db.ts';
 import { HEALTH_PORT, INTERNAL_TOKEN } from './internal.ts';
+import { t } from '../shared/i18n/server.ts';
 
 const HEALTH_ENTRY = fileURLToPath(new URL('../services/health/index.ts', import.meta.url));
 
@@ -19,7 +20,7 @@ let delay = 1_000;
 
 export function startHealthService(corePort: number) {
   if (process.env.HEALTH_URL) {
-    console.log(`  Health-Dienst: extern unter ${process.env.HEALTH_URL}`);
+    console.log(`  ${t('log.healthExternal', { url: process.env.HEALTH_URL })}`);
     return;
   }
   const spawn = () => {
@@ -40,7 +41,7 @@ export function startHealthService(corePort: number) {
       if (stopping) return;
       // Lief er eine Weile stabil, sofort neu starten; sonst mit wachsender Wartezeit
       if (Date.now() - startedAt > 60_000) delay = 1_000;
-      console.warn(`  [health] beendet (${signal ?? `Code ${code}`}), Neustart in ${Math.round(delay / 1000)} s`);
+      console.warn(`  ${t('log.healthExited', { reason: signal ?? t('log.healthExitCode', { code: code ?? '?' }), seconds: Math.round(delay / 1000) })}`);
       setTimeout(spawn, delay).unref();
       delay = Math.min(delay * 2, 60_000);
     });

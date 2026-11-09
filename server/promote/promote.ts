@@ -10,6 +10,7 @@ import { db } from '../db.ts';
 import { clientFor, getInstance, loadSnapshot, recordWorkflow } from '../sync.ts';
 import { mappingSetFor, setWorkflowMapping, targetWorkflowFor, workflowLabelsFor } from './mappings.ts';
 import { transformSnapshot } from './transform.ts';
+import { LocalizedError, packMessage, renderError, type Translator } from '../../shared/i18n/index.ts';
 
 export interface PromoteItem {
   workflowId: number;
@@ -32,7 +33,7 @@ function sourceInstanceRow(workflowId: number, sourceId: number) {
   const row = db
     .prepare('SELECT * FROM workflows WHERE id = ? AND instance_id = ?')
     .get(workflowId, sourceId) as { id: number; n8n_id: string; name: string; deleted_at: number | null } | undefined;
-  if (!row) throw new Error('Workflow gehört nicht zur Quell-Instanz');
+  if (!row) throw new LocalizedError({ key: 'errors.promote.notInSource' }, 404);
   return row;
 }
 
@@ -59,11 +60,11 @@ async function flowvaultWorkflowId(instanceId: number, n8nId: string): Promise<n
  * Übernimmt Workflows von `sourceId` nach `targetId`. Fehler einzelner Workflows
  * brechen den Batch nicht ab – sie landen als error im jeweiligen Ergebnis.
  */
-export async function promoteWorkflows(sourceId: number, targetId: number, items: PromoteItem[]): Promise<PromoteOutcome[]> {
+export async function promoteWorkflows(sourceId: number, targetId: number, items: PromoteItem[], tr: Translator): Promise<PromoteOutcome[]> {
   const sourceInst = getInstance(sourceId);
   const targetInst = getInstance(targetId);
-  if (!sourceInst || !targetInst) throw new Error('Instanz nicht gefunden');
-  if (sourceId === targetId) throw new Error('Quelle und Ziel müssen unterschiedliche Instanzen sein');
+  if (!sourceInst || !targetInst) throw new LocalizedError({ key: 'errors.instance.notFound' }, 404);
+  if (sourceId === targetId) throw new LocalizedError({ key: 'errors.promote.sameInstance' }, 400);
 
   const mappings = mappingSetFor(sourceId, targetId);
   const names = workflowLabelsFor(sourceId, targetId);
@@ -79,14 +80,14 @@ export async function promoteWorkflows(sourceId: number, targetId: number, items
     try {
       const src = sourceInstanceRow(item.workflowId, sourceId);
       const v = versionOf(item.workflowId, item.versionId);
-      if (!v) throw new Error('Keine gesicherte Version für diesen Workflow');
+      if (!v) throw new LocalizedError({ key: 'errors.promote.noVersionForWorkflow' }, 404);
       const snap = loadSnapshot(v.id)!;
       base.name = src.name;
       base.version = v.number;
 
       const transformed = transformSnapshot(snap, mappings, { workflowNames: names });
       const match = targetWorkflowFor(sourceId, targetId, src.n8n_id, src.name);
-      const message = `Übernommen aus „${src.name}“ v${v.number} (${sourceInst.name})`;
+      const message = packMessage('versionMessage.promoted', { name: src.name, version: v.number, instance: sourceInst.name });
 
       if (match) {
         await client.updateWorkflow(match.row.n8n_id, transformed.snapshot);
@@ -122,7 +123,7 @@ export async function promoteWorkflows(sourceId: number, targetId: number, items
         });
       }
     } catch (e) {
-      out.push({ ...base, action: 'updated', targetWorkflowId: null, targetN8nId: null, applied: [], missing: [], error: (e as Error).message });
+      out.push({ ...base, action: 'updated', targetWorkflowId: null, targetN8nId: null, applied: [], missing: [], error: renderError(e, tr) });
     }
   }
   return out;

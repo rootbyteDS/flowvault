@@ -6,6 +6,7 @@
  * (transform.test.ts). Die Zuordnungen selbst liefert mappings.ts als MappingSet.
  */
 import type { Snapshot } from '../../shared/diff.ts';
+import { packMessage } from '../../shared/i18n/index.ts';
 
 export type MappingKind = 'credential' | 'workflow' | 'webhookPath' | 'dataTable';
 
@@ -28,9 +29,9 @@ export interface MappingSet {
 
 export interface TransformResult {
   snapshot: Snapshot;
-  /** Lesbare Meldungen, was ersetzt wurde */
+  /** Was ersetzt wurde – als übersetzbare Meldungen (`i18n:…`), die Oberfläche macht Text daraus */
   applied: string[];
-  /** Lesbare Warnungen, welche Referenzen ohne Zuordnung blieben */
+  /** Welche Referenzen ohne Zuordnung blieben – ebenfalls übersetzbar */
   missing: string[];
 }
 
@@ -65,9 +66,9 @@ export function transformSnapshot(
         const to = mappings.credentials.get(cred.id);
         if (to) {
           (node.credentials as Record<string, unknown>)[typeKey] = { id: to.id, name: to.name };
-          applied.add(`Credential „${cred.name ?? cred.id}“ → „${to.name}“`);
+          applied.add(packMessage('transform.applied.credential', { from: cred.name ?? cred.id, to: to.name }));
         } else {
-          missing.add(`Credential „${cred.name ?? cred.id}“ (${typeKey}) ohne Zuordnung`);
+          missing.add(packMessage('transform.missing.credential', { name: cred.name ?? cred.id, type: typeKey }));
         }
       }
     }
@@ -91,9 +92,9 @@ export function transformSnapshot(
     const to = mappings.workflows.get(errorWorkflow);
     if (to) {
       next.settings = { ...(next.settings ?? {}), errorWorkflow: to };
-      applied.add(`Error-Workflow „${wfName(errorWorkflow)}“ → „${wfName(to)}“`);
+      applied.add(packMessage('transform.applied.errorWorkflow', { from: wfName(errorWorkflow), to: wfName(to) }));
     } else {
-      missing.add(`Error-Workflow „${wfName(errorWorkflow)}“ ohne Zuordnung`);
+      missing.add(packMessage('transform.missing.errorWorkflow', { name: wfName(errorWorkflow) }));
     }
   }
 
@@ -138,10 +139,10 @@ function mapValue(key: string, v: string, top: boolean, ctx: WalkCtx): string {
   if (key === 'workflowId') {
     const to = mappings.workflows.get(v);
     if (to) {
-      applied.add(`Sub-Workflow „${ctx.wfName(v)}“ → „${ctx.wfName(to)}“`);
+      applied.add(packMessage('transform.applied.subWorkflow', { from: ctx.wfName(v), to: ctx.wfName(to) }));
       return to;
     }
-    if (ctx.isExecute) missing.add(`Sub-Workflow „${ctx.wfName(v)}“ ohne Zuordnung`);
+    if (ctx.isExecute) missing.add(packMessage('transform.missing.subWorkflow', { name: ctx.wfName(v) }));
     return v;
   }
 
@@ -150,10 +151,10 @@ function mapValue(key: string, v: string, top: boolean, ctx: WalkCtx): string {
   if (key === 'dataTableId' || key === 'tableId') {
     const to = mappings.dataTables.get(v);
     if (to) {
-      if (key === 'dataTableId') applied.add(`Data-Table „${v}“ → „${to}“`);
+      if (key === 'dataTableId') applied.add(packMessage('transform.applied.dataTable', { from: v, to }));
       return to;
     }
-    if (key === 'dataTableId') missing.add(`Data-Table „${v}“ ohne Zuordnung`);
+    if (key === 'dataTableId') missing.add(packMessage('transform.missing.dataTable', { name: v }));
     return v;
   }
 
@@ -162,7 +163,7 @@ function mapValue(key: string, v: string, top: boolean, ctx: WalkCtx): string {
   if (key === 'path' && ctx.isWebhook && top) {
     const to = mappings.webhookPaths.get(v);
     if (to && to !== v) {
-      applied.add(`Webhook-Pfad „${v}“ → „${to}“`);
+      applied.add(packMessage('transform.applied.webhookPath', { from: v, to }));
       return to;
     }
     return v;

@@ -4,6 +4,7 @@ import { AlertTriangle, Copy, RotateCcw } from 'lucide-react';
 import { api, useApi, type Instance } from '../api.ts';
 import { Button, ErrorBox, Field, Modal, inputCls, useToast } from './ui.tsx';
 import { cx } from '../util.ts';
+import { rich, t } from '../i18n.tsx';
 
 export function RestoreModal({ open, onClose, versionId, versionNumber, workflowName, instanceId, deleted, onDone }: {
   open: boolean;
@@ -40,10 +41,10 @@ export function RestoreModal({ open, onClose, versionId, versionNumber, workflow
       const mapped = r.mapped ?? 0;
       toast(
         mode === 'overwrite'
-          ? `Version ${versionNumber} wurde in n8n wiederhergestellt`
+          ? t('restore.overwritten', { number: versionNumber })
           : mapped
-            ? `Workflow wurde als Kopie angelegt · ${mapped} Zuordnung${mapped > 1 ? 'en' : ''} angewandt`
-            : 'Workflow wurde als Kopie in n8n angelegt',
+            ? t('restore.copiedMapped', { count: mapped })
+            : t('restore.copied'),
       );
       onClose();
       onDone();
@@ -77,25 +78,25 @@ export function RestoreModal({ open, onClose, versionId, versionNumber, workflow
     <Modal
       open={open}
       onClose={onClose}
-      title={`Version ${versionNumber} wiederherstellen`}
+      title={t('restore.title', { number: versionNumber })}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
-          <Button variant="primary" loading={busy} onClick={go}>{mode === 'overwrite' ? 'Wiederherstellen' : 'Kopie anlegen'}</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="primary" loading={busy} onClick={go}>{t(mode === 'overwrite' ? 'restore.confirm' : 'restore.createCopy')}</Button>
         </>
       }
     >
       <div className="space-y-3">
-        <Option value="overwrite" icon={RotateCcw} title="Workflow in n8n überschreiben" text="Ersetzt den aktuellen Stand. Der bisherige Stand bleibt in FlowVault gesichert." disabled={deleted} />
-        <Option value="copy" icon={Copy} title="Als neuen Workflow anlegen" text="Auch auf einer anderen Instanz, z. B. von Staging nach Produktion" />
+        <Option value="overwrite" icon={RotateCcw} title={t('restore.overwriteTitle')} text={t('restore.overwriteText')} disabled={deleted} />
+        <Option value="copy" icon={Copy} title={t('restore.copyTitle')} text={t('restore.copyText')} />
         {mode === 'copy' && (
           <div className="grid gap-3 pt-1 sm:grid-cols-2">
-            <Field label="Ziel-Instanz">
+            <Field label={t('restore.target')}>
               <select className={inputCls} value={target} onChange={(e) => setTarget(Number(e.target.value))}>
                 {instances.data?.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
             </Field>
-            <Field label="Name">
+            <Field label={t('restore.name')}>
               <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
           </div>
@@ -103,15 +104,10 @@ export function RestoreModal({ open, onClose, versionId, versionNumber, workflow
         <div className="flex gap-2 rounded-lg bg-panel-3 px-3 py-3 text-xs leading-5 text-muted">
           <AlertTriangle className="size-4 shrink-0 text-mod" />
           <span>
-            {mode === 'copy' && target !== instanceId ? (
-              <>
-                Gespeicherte <b className="text-text">Zuordnungen</b> (Umgebungen) werden angewandt – fehlende IDs bleiben
-                unverändert und lassen sich unter <b className="text-text">Umgebungen</b> pflegen.
-              </>
-            ) : (
-              <>Credentials werden nur referenziert. Auf einer anderen Instanz müssen sie dort unter gleichem Namen existieren bzw. neu zugewiesen werden.</>
-            )}{' '}
-            Neu angelegte Workflows sind zunächst inaktiv.
+            {mode === 'copy' && target !== instanceId
+              ? rich('restore.noteMapped', { b: (c) => <b className="text-text">{c}</b> })
+              : t('restore.noteCredentials')}{' '}
+            {t('restore.noteInactive')}
           </span>
         </div>
         {error && <ErrorBox>{error}</ErrorBox>}

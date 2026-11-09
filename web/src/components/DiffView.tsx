@@ -7,6 +7,7 @@ import { WorkflowCanvas, canvasFromDiff } from './WorkflowCanvas.tsx';
 import { nodeVisual } from './changes.tsx';
 import { Card } from './ui.tsx';
 import { cx, shortType } from '../util.ts';
+import { rich, t } from '../i18n.tsx';
 
 type Row = { kind: 'add' | 'del' | 'ctx'; text: string; a?: number; b?: number } | { kind: 'gap'; count: number; id: number };
 
@@ -48,7 +49,7 @@ export function JsonDiff({ before, after, context = 3, className }: { before: st
 
   return (
     <div className={cx('overflow-auto rounded-lg border border-line bg-bg font-mono text-[12px] leading-[20px]', className)}>
-      {!changes && <div className="px-4 py-3 font-sans text-sm text-muted">Keine Unterschiede</div>}
+      {!changes && <div className="px-4 py-3 font-sans text-sm text-muted">{t('diff.noDifferences')}</div>}
       {changes && (
         <table className="w-full border-collapse">
           <tbody>
@@ -61,7 +62,7 @@ export function JsonDiff({ before, after, context = 3, className }: { before: st
                   <tr key={idx} className="bg-panel-2">
                     <td colSpan={4} className="px-3 py-0.5">
                       <button className="font-sans text-xs text-muted hover:text-text" onClick={() => setExpanded((s) => new Set(s).add(r.id))}>
-                        ⋯ {r.count} unveränderte Zeilen anzeigen
+                        {t('diff.showUnchanged', { count: r.count })}
                       </button>
                     </td>
                   </tr>,
@@ -95,7 +96,7 @@ function NodeChangeItem({ c, open, onToggle, fail }: { c: NodeChange; open: bool
   const n = (c.after ?? c.before)!;
   const v = nodeVisual(n.type);
   const sym = { added: ['+', 'text-add'], removed: ['−', 'text-del'], modified: ['~', 'text-mod'], unchanged: ['→', 'text-dim'] }[c.status];
-  const label = { added: 'Hinzugefügt', removed: 'Entfernt', modified: 'Geändert', unchanged: c.renamed ? 'Umbenannt' : 'Verschoben' }[c.status];
+  const label = t({ added: 'diff.status.added', removed: 'diff.status.removed', modified: 'diff.status.modified', unchanged: c.renamed ? 'diff.status.renamed' : 'diff.status.moved' }[c.status] as 'diff.status.added');
   return (
     <div className="border-b border-line last:border-0">
       <button onClick={onToggle} className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-panel-2">
@@ -119,7 +120,7 @@ function NodeChangeItem({ c, open, onToggle, fail }: { c: NodeChange; open: bool
         </span>
         {fail && (
           <span className="shrink-0 text-xs text-del" title={fail.lastMessage ?? undefined}>
-            {fail.failed}× gescheitert{fail.isNew ? ', neu' : ''}
+            {t(fail.isNew ? 'diff.failedTimesNew' : 'diff.failedTimes', { count: fail.failed })}
           </span>
         )}
         <span className="shrink-0 text-xs text-dim">{label}</span>
@@ -163,11 +164,11 @@ export function DiffView({ from, to, diff, failing }: { from: Snapshot | null; t
   };
 
   const meta: { icon: typeof Type; text: React.ReactNode }[] = [];
-  if (s.nameChanged) meta.push({ icon: Type, text: <>Name: <span className="text-muted line-through">{s.nameChanged.from}</span> → {s.nameChanged.to}</> });
-  if (s.activeChanged !== undefined) meta.push({ icon: Power, text: s.activeChanged ? 'Workflow wurde aktiviert' : 'Workflow wurde deaktiviert' });
-  if (s.tagsChanged) meta.push({ icon: Tag, text: <>Tags: {from?.tags.join(', ') || '–'} → {to.tags.join(', ') || '–'}</> });
-  if (s.settingsChanged) meta.push({ icon: Settings, text: 'Workflow-Einstellungen geändert' });
-  if (s.pinDataChanged) meta.push({ icon: FileJson, text: 'Testdaten (Pin Data) geändert' });
+  if (s.nameChanged) meta.push({ icon: Type, text: rich('diff.nameChanged', { s: (c) => <span className="text-muted line-through">{c}</span> }, { from: s.nameChanged.from, to: s.nameChanged.to }) });
+  if (s.activeChanged !== undefined) meta.push({ icon: Power, text: t(s.activeChanged ? 'diff.activated' : 'diff.deactivated') });
+  if (s.tagsChanged) meta.push({ icon: Tag, text: t('diff.tags', { from: from?.tags.join(', ') || '–', to: to.tags.join(', ') || '–' }) });
+  if (s.settingsChanged) meta.push({ icon: Settings, text: t('diff.settings') });
+  if (s.pinDataChanged) meta.push({ icon: FileJson, text: t('diff.pinData') });
 
   return (
     <div className="space-y-6">
@@ -191,12 +192,12 @@ export function DiffView({ from, to, diff, failing }: { from: Snapshot | null; t
 
       <Card>
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <h2 className="text-sm font-medium">Geänderte Nodes</h2>
+          <h2 className="text-sm font-medium">{t('diff.changedNodes')}</h2>
           <span className="text-xs text-muted">
-            {changed.length} von {diff.nodes.length} Nodes
+            {t('diff.nodesOf', { changed: changed.length, total: diff.nodes.length })}
           </span>
         </div>
-        {changed.length === 0 && <div className="px-4 py-6 text-center text-sm text-muted">Keine Node inhaltlich verändert</div>}
+        {changed.length === 0 && <div className="px-4 py-6 text-center text-sm text-muted">{t('diff.noNodeChanged')}</div>}
         {changed.map((c) => (
           <div id={`chg-${c.key}`} key={c.key} className={cx(selected === c.key && 'bg-panel-2')}>
             <NodeChangeItem c={c} open={open.has(c.key)} onToggle={() => toggle(c.key)} fail={c.after ? failByName.get(c.after.name) : undefined} />
@@ -204,7 +205,7 @@ export function DiffView({ from, to, diff, failing }: { from: Snapshot | null; t
         ))}
         {movedOnly.length > 0 && (
           <div className="border-t border-line px-4 py-3 text-xs text-dim">
-            Nur verschoben: {movedOnly.map((m) => m.after!.name).join(', ')}
+            {t('diff.movedOnly', { names: movedOnly.map((m) => m.after!.name).join(', ') })}
           </div>
         )}
       </Card>
@@ -212,16 +213,16 @@ export function DiffView({ from, to, diff, failing }: { from: Snapshot | null; t
       {(edgesAdded.length > 0 || edgesRemoved.length > 0) && (
         <Card>
           <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-            <h2 className="text-sm font-medium">Verbindungen</h2>
+            <h2 className="text-sm font-medium">{t('diff.connections')}</h2>
           </div>
           <div className="divide-y divide-line text-sm">
             {[...edgesAdded, ...edgesRemoved].map((e) => (
               <div key={e.key} className="flex items-center gap-2 px-4 py-2">
                 <span className={cx('w-3 text-center font-mono', e.status === 'added' ? 'text-add' : 'text-del')}>{e.status === 'added' ? '+' : '−'}</span>
                 <span className="font-medium">{e.fromName}</span>
-                <span className="text-dim">{e.outputIndex > 0 ? `Ausgang ${e.outputIndex + 1} ` : ''}→</span>
+                <span className="text-dim">{e.outputIndex > 0 ? `${t('diff.output', { number: e.outputIndex + 1 })} ` : ''}→</span>
                 <span className="font-medium">{e.toName}</span>
-                {e.type !== 'main' && <span className="font-mono text-xs text-dim">{e.type.replace(/^ai_/, 'ki:')}</span>}
+                {e.type !== 'main' && <span className="font-mono text-xs text-dim">{e.type.replace(/^ai_/, t('diff.aiPrefix'))}</span>}
               </div>
             ))}
           </div>
@@ -231,7 +232,7 @@ export function DiffView({ from, to, diff, failing }: { from: Snapshot | null; t
       <Card>
         <button onClick={() => setShowFull((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-panel-2">
           {showFull ? <ChevronDown className="size-4 text-muted" /> : <ChevronRight className="size-4 text-muted" />}
-          Vollständiger JSON-Diff
+          {t('diff.fullDiff')}
         </button>
         {showFull && (
           <div className="px-4 pb-4">

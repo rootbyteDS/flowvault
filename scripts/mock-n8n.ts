@@ -233,8 +233,8 @@ http.createServer(async (req, res) => {
       const prompt = String((body.messages as { content: string }[])?.at(-1)?.content ?? '');
       if (process.env.MOCK_LOG_PROMPT) console.log('--- PROMPT ---\n' + prompt + '\n--------------');
       const lines = prompt.split('\n').filter((l) => l.startsWith('- '));
-      const first = lines[0]?.slice(2) ?? 'Workflow beschrieben';
-      const title = /erste gesicherte Version/.test(prompt) ? 'Fehlermeldungen per Telegram melden' : first.replace(/"/g, '„').slice(0, 70);
+      const first = lines[0]?.slice(2) ?? 'Workflow described';
+      const title = /first saved version/.test(prompt) ? 'Report error messages via Telegram' : first.replace(/"/g, '“').slice(0, 70);
       const content = JSON.stringify({ title, details: lines.slice(0, 3).map((l) => l.slice(2, 90)) });
       return send(res, 200, { model: String(body.model), choices: [{ message: { role: 'assistant', content } }] });
     }

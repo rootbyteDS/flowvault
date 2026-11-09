@@ -212,23 +212,3 @@ export function diffWorkflows(before: Snapshot | null, after: Snapshot): Workflo
 
   return { summary, nodes, edges };
 }
-
-/** Kurzer, menschenlesbarer Titel für eine Version – wie eine Commit-Message. */
-export function describeSummary(s: ChangeSummary): string {
-  if (s.restoredFrom) return `Wiederhergestellt aus Version ${s.restoredFrom}`;
-  if (s.initial) return `Erste Sicherung · ${s.nodeCount} Nodes`;
-  const parts: string[] = [];
-  if (s.nameChanged) parts.push(`Umbenannt in „${s.nameChanged.to}“`);
-  if (s.activeChanged !== undefined) parts.push(s.activeChanged ? 'Aktiviert' : 'Deaktiviert');
-  if (s.added.length) parts.push(s.added.length === 1 ? `„${s.added[0]}“ hinzugefügt` : `${s.added.length} Nodes hinzugefügt`);
-  if (s.removed.length) parts.push(s.removed.length === 1 ? `„${s.removed[0]}“ entfernt` : `${s.removed.length} Nodes entfernt`);
-  if (s.modified.length) parts.push(s.modified.length === 1 ? `„${s.modified[0]}“ geändert` : `${s.modified.length} Nodes geändert`);
-  if (s.renamed.length) parts.push(s.renamed.length === 1 ? `„${s.renamed[0].from}“ → „${s.renamed[0].to}“` : `${s.renamed.length} Nodes umbenannt`);
-  if (!parts.length && (s.connectionsAdded || s.connectionsRemoved)) parts.push('Verbindungen geändert');
-  if (!parts.length && s.settingsChanged) parts.push('Einstellungen geändert');
-  if (!parts.length && s.tagsChanged) parts.push('Tags geändert');
-  if (!parts.length && s.pinDataChanged) parts.push('Testdaten (Pin Data) geändert');
-  if (!parts.length && s.moved.length) parts.push('Layout angepasst');
-  if (!parts.length) parts.push('Kleinere Änderungen');
-  return parts.slice(0, 3).join(' · ');
-}

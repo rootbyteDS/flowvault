@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react';
 import { CircleCheck, CircleX, PlugZap } from 'lucide-react';
 import { api, type Instance } from '../api.ts';
 import { Button, ErrorBox, Field, Modal, Switch, inputCls, useToast } from './ui.tsx';
-import { cx } from '../util.ts';
+import { cx, formatNumber } from '../util.ts';
+import { rich, paragraphs, t } from '../i18n.tsx';
+import type { MessageKey } from '../i18n.tsx';
 
 const COLORS = ['#ff6d5a', '#ea4b71', '#a78bfa', '#58a6ff', '#2dd4bf', '#3fb950', '#e3a92b', '#94a3b8'];
-const INTERVALS = [
-  [0, 'Nur manuell'],
-  [5, 'Alle 5 Minuten'],
-  [15, 'Alle 15 Minuten'],
-  [30, 'Alle 30 Minuten'],
-  [60, 'Stündlich'],
-  [360, 'Alle 6 Stunden'],
-  [1440, 'Täglich'],
-] as const;
+const INTERVALS: readonly (readonly [number, MessageKey])[] = [
+  [0, 'instances.form.intervals.manual'],
+  [5, 'instances.form.intervals.every5'],
+  [15, 'instances.form.intervals.every15'],
+  [30, 'instances.form.intervals.every30'],
+  [60, 'instances.form.intervals.hourly'],
+  [360, 'instances.form.intervals.every6h'],
+  [1440, 'instances.form.intervals.daily'],
+];
 
 export function InstanceForm({ open, onClose, instance, onSaved }: {
   open: boolean;
@@ -53,7 +55,7 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
       const r = await api<{ ok: boolean; error?: string; workflows?: number }>('/instances/test', {
         body: { base_url: form.base_url, api_key: form.api_key, id: instance?.id },
       });
-      setTest(r.ok ? { ok: true, text: `Verbunden, ${r.workflows! >= 250 ? '250+' : r.workflows} Workflows gefunden` } : { ok: false, text: r.error! });
+      setTest(r.ok ? { ok: true, text: t('instances.form.testOk', { count: r.workflows!, shown: r.workflows! >= 250 ? '250+' : formatNumber(r.workflows!) }) } : { ok: false, text: r.error! });
       return r.ok;
     } catch (e) {
       setTest({ ok: false, text: (e as Error).message });
@@ -65,9 +67,9 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
 
   async function save() {
     setError(undefined);
-    if (!form.name.trim()) return setError('Bitte einen Namen vergeben');
-    if (!instance && !form.api_key.trim()) return setError('Bitte einen API-Key eintragen');
-    if (instance && urlChanged && !form.api_key.trim()) return setError('Bei geänderter URL bitte den API-Key erneut eingeben');
+    if (!form.name.trim()) return setError(t('instances.form.nameRequired'));
+    if (!instance && !form.api_key.trim()) return setError(t('instances.form.keyRequired'));
+    if (instance && urlChanged && !form.api_key.trim()) return setError(t('errors.instance.keyRequired'));
     setSaving(true);
     try {
       if (!test?.ok && (!instance || form.api_key || form.base_url !== instance.base_url)) {
@@ -80,7 +82,7 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
       const saved = instance
         ? await api<Instance>(`/instances/${instance.id}`, { method: 'PUT', body: form })
         : await api<Instance>('/instances', { body: form });
-      toast(instance ? 'Instanz gespeichert' : `„${saved.name}“ verbunden – erste Sicherung läuft …`);
+      toast(instance ? t('instances.form.saved') : t('instances.form.connected', { name: saved.name }));
       onSaved(saved);
       onClose();
     } catch (e) {
@@ -94,35 +96,31 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
     <Modal
       open={open}
       onClose={onClose}
-      title={instance ? 'Instanz bearbeiten' : 'n8n-Instanz verbinden'}
+      title={t(instance ? 'instances.form.titleEdit' : 'instances.form.titleNew')}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           <Button variant="primary" onClick={save} loading={saving}>
-            {instance ? 'Speichern' : 'Verbinden'}
+            {t(instance ? 'common.save' : 'instances.form.submitConnect')}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <Field label="Name">
-          <input className={inputCls} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="z. B. Produktion" autoFocus />
+        <Field label={t('instances.form.name')}>
+          <input className={inputCls} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder={t('instances.form.namePlaceholder')} autoFocus />
         </Field>
-        <Field label="URL der n8n-Instanz">
-          <input className={inputCls} value={form.base_url} onChange={(e) => set('base_url', e.target.value)} placeholder="https://n8n.meinefirma.de" />
+        <Field label={t('instances.form.url')}>
+          <input className={inputCls} value={form.base_url} onChange={(e) => set('base_url', e.target.value)} placeholder={t('instances.form.urlPlaceholder')} />
         </Field>
         <Field
-          label="API-Key"
+          label={t('instances.form.apiKey')}
           hint={
-            instance ? (
-              urlChanged ? (
-                <>Die URL wurde geändert – aus Sicherheitsgründen bitte den API-Key erneut eingeben.</>
-              ) : (
-                <>Leer lassen, um den gespeicherten Key ({instance.key_hint}) zu behalten.</>
-              )
-            ) : (
-              <>In n8n unter <span className="text-muted">Settings → n8n API → Create an API key</span> erstellen. Der Key wird verschlüsselt gespeichert.</>
-            )
+            instance
+              ? urlChanged
+                ? t('instances.form.keyChanged')
+                : t('instances.form.keyKeep', { hint: instance.key_hint })
+              : rich('instances.form.keyNew', { m: (c) => <span className="text-muted">{c}</span> })
           }
         >
           <input
@@ -135,14 +133,14 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
           />
         </Field>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Automatische Sicherung">
+          <Field label={t('instances.form.interval')}>
             <select className={inputCls} value={form.sync_interval} onChange={(e) => set('sync_interval', Number(e.target.value))}>
               {INTERVALS.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
+                <option key={v} value={v}>{t(l)}</option>
               ))}
             </select>
           </Field>
-          <Field label="Farbe">
+          <Field label={t('instances.form.color')}>
             <div className="flex h-9 items-center gap-1.5">
               {COLORS.map((c) => (
                 <button
@@ -160,19 +158,14 @@ export function InstanceForm({ open, onClose, instance, onSaved }: {
         <Switch
           checked={form.include_archived}
           onChange={(v) => set('include_archived', v)}
-          label="Archivierte Workflows sichern"
-          hint="Standardmäßig aus: In n8n archivierte Workflows werden übersprungen."
-          info={
-            <>
-              <p><b>Aus</b> (Standard): Archivierte Workflows bekommen keine neuen Versionen und tauchen in Listen und Zahlen nicht auf. Was schon gesichert war, bleibt erhalten und ist unter Workflows → „Archiviert“ zu finden.</p>
-              <p><b>An</b>: Archivierte Workflows werden wie alle anderen gesichert. Holst du einen Workflow in n8n aus dem Archiv zurück, sichert FlowVault ihn ohnehin wieder.</p>
-            </>
-          }
+          label={t('instances.form.archived')}
+          hint={t('instances.form.archivedHint')}
+          info={paragraphs('instances.form.archivedTip')}
         />
 
         <div className="flex items-center gap-3 rounded-lg border border-line px-3 py-3">
           <Button size="sm" onClick={runTest} loading={testing} icon={<PlugZap className="size-4" />} disabled={!form.base_url}>
-            Verbindung testen
+            {t('instances.form.test')}
           </Button>
           {test && (
             <span className={cx('flex min-w-0 items-center gap-1.5 text-[13px]', test.ok ? 'text-add' : 'text-del')}>

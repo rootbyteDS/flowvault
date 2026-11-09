@@ -4,7 +4,7 @@ Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workfl
 
 **Stand: 0.2.0, frühe Entwicklung.** FlowVault wird selbst gehostet und verwendet ein einzelnes Admin-Konto mit E-Mail und Passwort sowie optionaler Zwei-Faktor-Authentifizierung (TOTP). Mehrere Benutzer und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
 
-[Schnellstart](#schnellstart-lokal) · [Docker](#betrieb-mit-docker) · [Entwicklung](#entwicklung) · [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md)
+[Schnellstart](#schnellstart-lokal) · [Docker](#betrieb-mit-docker) · [Entwicklung](#entwicklung) · [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md) · [English](README.en.md)
 
 ## Features
 
@@ -19,6 +19,7 @@ Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workfl
 - **Archivierte Workflows** werden standardmäßig übersprungen. Pro Instanz einschaltbar unter *Instanz bearbeiten → Archivierte Workflows sichern*. Schon gesicherte Historie bleibt erhalten (Workflows → „Archiviert“).
 - **Welche Änderung hat es kaputt gemacht?** FlowVault holt die Ausführungen aus n8n und legt sie über die Versionshistorie: Fehlerquote pro Version („seit v14 schlagen 38 % fehl, vorher 0 %“), im Diff-Canvas rot markiert, welcher Node seit der Änderung scheitert, und bei einem Anstieg eine Warnung mit Rollback-Vorschlag. Rollback per Klick. Läuft als eigener Prozess innerhalb von FlowVault, siehe [Health-Dienst](#health-dienst-fehlerquote-pro-version)
 - **Download** jeder Version als n8n-importierbares JSON
+- **Deutsch und Englisch**: Oberfläche, Fehlermeldungen und KI-Texte; weitere Sprachen lassen sich ohne Codeänderung ergänzen (siehe [Sprachen](#sprachen))
 - Aktivitäts-Feed und Heatmap, Sync-Protokoll pro Instanz
 - API-Keys AES-256-GCM-verschlüsselt, Login mit E-Mail und Passwort, optionale 2FA per Authenticator-App mit einmaligen Wiederherstellungscodes (siehe [Sicherheit](#sicherheit))
 - **KI-Änderungstexte (optional)** über [Melious](https://melious.ai): Zu jeder neuen Version schreibt ein Modell auf EU-Infrastruktur einen Titel im Commit-Stil plus Stichpunkte. Gesendet werden nur die geänderten Nodes und Parameter – nur wenn du für eine erste Version selbst einen Text anforderst, der ganze Workflow. Werte von Feldern wie `password`, `token`, `apiKey` oder `Authorization` sowie typische Key-Formate (Bearer, JWT, `sk_…`, `ghp_…`, AWS) entfernt FlowVault vorher. Das ist eine Heuristik: Zugangsdaten gehören in n8n-Credentials, nicht in Code-Nodes. Einrichtung unter **Einstellungen → KI-Änderungstexte**.
@@ -56,7 +57,7 @@ MOCK_ENV=Prod MOCK_PORT=5680 npm run mock-n8n   # zweite Fake-Instanz mit eigene
 curl -X POST localhost:5679/_mock/mutate   # simuliert eine Workflow-Änderung
 curl -X POST localhost:5679/_mock/break    # Änderung, nach der ein Node in 40 % der Läufe scheitert
 curl -X POST 'localhost:5679/_mock/run?n=30'  # sofort 30 Läufe pro aktivem Workflow
-npm test             # Auth-/2FA-Tests, Umgebungs-Zuordnungen und Health-Auswertung
+npm test             # Auth-/2FA-Tests, Umgebungs-Zuordnungen, Health-Auswertung und Übersetzungen
 # Der Mock spielt auch Melious: API-Adresse http://localhost:5679/v1, Key test-ai-key
 MOCK_LOG_PROMPT=1 npm run mock-n8n          # zeigt, was an die KI gesendet würde
 npm run typecheck
@@ -134,6 +135,7 @@ Eine angenommene Anfrage bedeutet **nicht**, dass das Update erfolgreich install
 | `APP_SECRET`     | –            | Schlüssel für die API-Key-Verschlüsselung. Ohne: wird automatisch in `data/secret.key` erzeugt |
 | `ADMIN_PASSWORD` | –            | Festes Admin-Passwort statt Einrichtung im Browser |
 | `ADMIN_EMAIL`    | –            | Feste Admin-E-Mail; zusammen mit `ADMIN_PASSWORD` ohne Ersteinrichtung nutzbar. Ohne diese Variable wird die E-Mail im Browser hinterlegt |
+| `DEFAULT_LANGUAGE` | `de`       | `de` oder `en`: Sprache der Server-Logs und der KI-Änderungstexte sowie Ausweichsprache der Oberfläche (siehe [Sprachen](#sprachen)) |
 | `TRUST_PROXY`    | –            | `1` hinter einem Reverse Proxy (Pflicht, sonst greift die Login-Sperre für alle) |
 | `APP_REVISION`   | –            | Optionaler Docker-Build-Parameter für den gebauten Git-Commit |
 | `UPDATE_WEBHOOK_URL` | –        | Externer Deployment-Webhook (POST); ohne diesen ist der UI-Update-Button nicht aktiv |
@@ -144,6 +146,14 @@ Eine angenommene Anfrage bedeutet **nicht**, dass das Update erfolgreich install
 Docker Compose liest `.env` für die in `docker-compose.yml` referenzierten Variablen. Weitere Einstellungen müssen dort unter `environment` ergänzt werden. Beim direkten Start über npm wird `.env` nicht automatisch geladen: Variablen in der Shell setzen, z. B. `PORT=4001 HEALTH_PORT=4101 npm start` (macOS/Linux).
 
 FlowVault startet den Health-Dienst selbst als Kindprozess und startet ihn nach einem Absturz neu. Fällt er aus, läuft FlowVault normal weiter, nur ohne Betriebsdaten. Core und Dienst teilen sich ein internes Token, das automatisch in `data/internal.token` liegt.
+
+## Sprachen
+
+Die Oberfläche gibt es auf **Deutsch** und **Englisch**. Sie folgt zunächst der Browsersprache; im Sprachwähler auf der Anmeldeseite und unter **Einstellungen → Sprache** lässt sie sich pro Browser umstellen. Fehlermeldungen des Servers erscheinen in derselben Sprache.
+
+Mit `DEFAULT_LANGUAGE=en` (in der `.env` bzw. in Arcane) schreibt FlowVault Server-Logs – z. B. den Einrichtungscode in `docker logs flowvault` – und neue KI-Änderungstexte auf Englisch; die Oberfläche greift darauf zurück, wenn der Browser keine unterstützte Sprache meldet. Die Sprache der KI-Texte lässt sich zusätzlich unter **Einstellungen → KI-Änderungstexte** wählen.
+
+Weitere Sprachen sind ein Ordner mit Textdateien, ohne Eingriff in den Programmcode: [docs/I18N.md](docs/I18N.md).
 
 ## Umgebungen: Staging → Produktion
 
@@ -224,6 +234,7 @@ services/health/ Health-Dienst: Ausführungen ↔ Versionen, Fehlerquoten, Warnu
   evaluate.ts    Verknüpft Auswertung mit Versionen, pflegt Warnungen
   db.ts          Eigene SQLite-Datenbank (health.db)
 shared/diff.ts   Workflow-Vergleich (Server & Browser)
+shared/i18n/     Sprachen: Übersetzer und Texte (Deutsch, Englisch), von Server und Browser genutzt
 shared/executions.ts  Ausführungen reduzieren, Typen für Core, Dienst & Browser
 web/             React + Tailwind (Vite)
 scripts/         Mock-n8n zum Testen

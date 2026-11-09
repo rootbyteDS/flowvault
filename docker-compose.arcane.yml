@@ -3,6 +3,9 @@
 # Der Build lädt den Quellcode direkt aus dem öffentlichen GitHub-Repository.
 services:
   flowvault:
+    # Fester lokaler Image-Name für Build und anschließende Redeploys.
+    image: flowvault:local
+    pull_policy: never
     build:
       context: https://github.com/rootbyteDS/flowvault.git#main
       dockerfile: Dockerfile
@@ -23,6 +26,8 @@ services:
       UPDATE_WEBHOOK_URL: ${UPDATE_WEBHOOK_URL:-}
       UPDATE_WEBHOOK_TOKEN: ${UPDATE_WEBHOOK_TOKEN:-}
       UPDATE_MANAGEMENT_URL: ${UPDATE_MANAGEMENT_URL:-}
+      # Optional: Sprache für Server-Logs und KI-Texte (de oder en). Leer = Deutsch.
+      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-}
       # Bei Betrieb hinter einem Reverse Proxy in Arcane TRUST_PROXY=1 setzen.
       TRUST_PROXY: ${TRUST_PROXY:-0}
     volumes:

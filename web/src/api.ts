@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeSummary, Snapshot, WorkflowDiff } from '../../shared/diff.ts';
+import { currentLocale, t } from './i18n.tsx';
 
 import type { FailingNode, HealthAlert, HealthSettings, HealthStatus, VersionHealth, WorkflowHealth } from '../../shared/executions.ts';
 
@@ -20,7 +21,8 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   const write = method !== 'GET' && method !== 'HEAD';
   const res = await fetch(`/api${path}`, {
     method,
-    headers: write ? { 'Content-Type': 'application/json' } : undefined,
+    // Accept-Language: Der Server antwortet (Fehlermeldungen, Vorschläge) in der gewählten Sprache
+    headers: { 'Accept-Language': currentLocale(), ...(write ? { 'Content-Type': 'application/json' } : {}) },
     body: write ? JSON.stringify(opts.body ?? {}) : undefined,
     credentials: 'same-origin',
   });
@@ -28,7 +30,7 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
   if (res.status === 401 && !path.startsWith('/auth')) {
     window.dispatchEvent(new Event('fv:unauthorized'));
   }
-  if (!res.ok) throw new ApiError(data.error ?? `Fehler ${res.status}`, res.status);
+  if (!res.ok) throw new ApiError(data.error ?? t('errors.http.status', { status: res.status }), res.status);
   return data as T;
 }
 
@@ -138,6 +140,7 @@ export interface AiSettings {
   auto: boolean;
   base_url: string;
   model: string;
+  language: string;
   configured: boolean;
   key_hint: string | null;
   pending: number;
@@ -197,6 +200,7 @@ export interface Overview {
     versions: number;
     versions_7d: number;
     last_sync: number | null;
+    first_backup: number | null;
     storage_bytes: number;
   };
   days: { day: number; n: number }[];
@@ -213,12 +217,8 @@ export interface CompareResult {
 
 export type MappingKind = 'credential' | 'workflow' | 'webhookPath' | 'dataTable';
 
-export const MAPPING_KIND_LABEL: Record<MappingKind, string> = {
-  credential: 'Credential',
-  workflow: 'Sub-Workflow',
-  webhookPath: 'Webhook-Pfad',
-  dataTable: 'Data-Table',
-};
+/** Beschriftung einer Zuordnungsart in der aktiven Sprache. */
+export const mappingKindLabel = (kind: MappingKind): string => t(`promote.kind.${kind}`);
 
 export interface MappingRow {
   id: number;

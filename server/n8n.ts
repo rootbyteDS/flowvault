@@ -1,5 +1,6 @@
 /** Minimaler Client für die öffentliche n8n REST API (/api/v1). */
 import { FetchError, errorMessageFrom, safeFetch } from './net.ts';
+import { LocalizedError } from '../shared/i18n/index.ts';
 import { slimExecution, type ExecutionPage } from '../shared/executions.ts';
 
 export interface N8nNode {
@@ -31,13 +32,7 @@ export interface N8nWorkflow {
   [k: string]: unknown;
 }
 
-export class N8nError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
+export class N8nError extends LocalizedError {}
 
 export function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
@@ -72,21 +67,20 @@ export class N8nClient {
         signal: AbortSignal.timeout(30_000),
       });
     } catch (e) {
-      if (e instanceof FetchError) throw new N8nError(e.message, e.status);
+      if (e instanceof FetchError) throw new N8nError(e.key ? { key: e.key, params: e.params } : e.message, e.status);
       const cause = (e as { cause?: { code?: string; message?: string } }).cause;
-      throw new N8nError(`Instanz nicht erreichbar (${cause?.code ?? cause?.message ?? (e as Error).message})`, 0);
+      throw new N8nError({ key: 'errors.n8n.unreachable', params: { reason: cause?.code ?? cause?.message ?? (e as Error).message } }, 0);
     }
     const text = await res.text();
     if (!res.ok) {
-      let msg = errorMessageFrom(text, res.status);
-      if (res.status === 401) msg = 'API-Key ungültig oder abgelaufen (401)';
-      if (res.status === 404 && path.startsWith('/workflows?')) msg = 'Keine n8n Public API unter dieser URL gefunden (404)';
-      throw new N8nError(`${msg}`.slice(0, 500), res.status);
+      if (res.status === 401) throw new N8nError({ key: 'errors.n8n.keyInvalid' }, res.status);
+      if (res.status === 404 && path.startsWith('/workflows?')) throw new N8nError({ key: 'errors.n8n.noPublicApi' }, res.status);
+      throw new N8nError(errorMessageFrom(text, res.status).slice(0, 500), res.status);
     }
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new N8nError('Antwort ist kein JSON – stimmt die URL?', res.status);
+      throw new N8nError({ key: 'errors.n8n.notJson' }, res.status);
     }
   }
 

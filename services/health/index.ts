@@ -12,6 +12,8 @@ import { listAlerts, refreshOpenAlerts, workflowHealth } from './evaluate.ts';
 import { pollAll, startScheduler } from './poller.ts';
 import type { HealthStatus } from '../../shared/executions.ts';
 import crypto from 'node:crypto';
+import { HttpError, requestT, t } from '../../shared/i18n/server.ts';
+import { renderError } from '../../shared/i18n/index.ts';
 
 const PORT = Number(process.env.HEALTH_PORT ?? 4100);
 const HOST = process.env.HEALTH_HOST ?? '127.0.0.1';
@@ -37,12 +39,12 @@ function sameToken(given: unknown) {
 
 app.use('/v1', (req, res, next) => {
   if (sameToken(req.headers['x-internal-token'])) return next();
-  res.status(401).json({ error: 'Ungültiges internes Token' });
+  res.status(401).json({ error: requestT(req)('errors.http.internalToken') });
 });
 
 const num = (v: unknown) => {
   const n = Number(v);
-  if (!Number.isInteger(n)) throw Object.assign(new Error('Ungültige ID'), { status: 400 });
+  if (!Number.isInteger(n)) throw new HttpError(400, 'errors.http.invalidId');
   return n;
 };
 
@@ -88,7 +90,7 @@ app.get('/v1/workflows/:id', async (req, res) => {
 
 app.get('/v1/alerts', async (req, res) => {
   const status = String(req.query.status ?? 'open');
-  if (!['open', 'dismissed', 'resolved', 'all'].includes(status)) throw Object.assign(new Error('Ungültiger Status'), { status: 400 });
+  if (!['open', 'dismissed', 'resolved', 'all'].includes(status)) throw new HttpError(400, 'errors.http.invalidStatus');
   if (status === 'open' || status === 'all') await refreshOpenAlerts();
   res.json(listAlerts(status));
 });
@@ -98,23 +100,24 @@ app.post('/v1/alerts/:id/dismiss', (req, res) => {
   res.json({ ok: true });
 });
 
-app.use((_req, res) => {
-  res.status(404).json({ error: 'Unbekannter Endpunkt' });
+app.use((req, res) => {
+  res.status(404).json({ error: requestT(req)('errors.http.unknownEndpoint') });
 });
 
-app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { status?: number }, req: Request, res: Response, _next: NextFunction) => {
   // Fehler aus dem Core (z. B. Workflow nicht gefunden) mit passendem Status durchreichen
-  const status = err instanceof CoreError ? (err.status === 404 ? 404 : 502) : (err.status ?? 500);
+  const status = err instanceof CoreError ? (err.status === 404 ? 404 : 502) : (err.status || 500);
   if (status >= 500) console.error(err);
-  res.status(status).json({ error: status >= 500 && !(err instanceof CoreError) ? 'Interner Fehler' : err.message });
+  const tr = requestT(req);
+  res.status(status).json({ error: status >= 500 && !(err instanceof CoreError) ? tr('errors.http.internal') : renderError(err, tr) });
 });
 
 app.listen(PORT, HOST, (err?: Error) => {
   if (err) {
-    console.error(`  [health] Kann nicht auf ${HOST}:${PORT} lauschen: ${err.message}`);
+    console.error(`  ${t('log.healthCannotListen', { address: `${HOST}:${PORT}`, reason: err.message })}`);
     process.exit(1);
   }
-  console.log(`  FlowVault Health läuft auf http://${HOST}:${PORT}`);
+  console.log(`  ${t('log.healthListening', { url: `http://${HOST}:${PORT}` })}`);
   startScheduler();
 });
 

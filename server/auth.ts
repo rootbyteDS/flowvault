@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { db, getSetting, setSetting } from './db.ts';
 import { hashPassword, randomToken, safeEqual, sha256, verifyPassword } from './crypto.ts';
+import { requestT, t } from '../shared/i18n/server.ts';
 
 const COOKIE = 'fv_session';
 const TTL = 30 * 24 * 60 * 60 * 1000;
@@ -50,7 +51,7 @@ let setupCode: string | null = null;
 export function announceSetupCode() {
   if (isSetUp()) return;
   setupCode = crypto.randomBytes(6).toString('hex').toUpperCase().replace(/(.{4})(?=.)/g, '$1-');
-  console.log(`  Einrichtungscode für das Admin-Konto: ${setupCode}\n`);
+  console.log(`  ${t('log.setupCode', { code: setupCode })}\n`);
 }
 
 /** Prüft den Code und verbraucht ihn bei Erfolg, damit parallele Einrichtungen scheitern. */
@@ -106,12 +107,12 @@ export function destroyAllSessions() {
 
 export function requireSession(req: Request, res: Response, next: NextFunction) {
   if (isAuthenticated(req)) return next();
-  res.status(401).json({ error: 'Nicht angemeldet' });
+  res.status(401).json({ error: requestT(req)('errors.http.unauthenticated') });
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   requireSession(req, res, () => {
-    if (!adminEmail()) return res.status(403).json({ error: 'Bitte zuerst die Admin-E-Mail hinterlegen' });
+    if (!adminEmail()) return res.status(403).json({ error: requestT(req)('errors.http.emailRequired') });
     next();
   });
 }

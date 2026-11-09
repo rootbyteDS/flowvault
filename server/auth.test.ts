@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
+import { defaultDashboardLayout } from '../shared/dashboard.ts';
 
 // All HTTP tests use an isolated database and encryption key, never the installation's data.
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'flowvault-auth-'));
@@ -17,6 +18,7 @@ delete process.env.APP_SECRET;
 const { db, getSetting, setSetting } = await import('./db.ts');
 const { announceSetupCode, requireAuth, setPassword } = await import('./auth.ts');
 const { createAuthRouter } = await import('./auth-router.ts');
+const { createDashboardRouter } = await import('./dashboard.ts');
 const { decrypt, sha256 } = await import('./crypto.ts');
 const { totp, totpCounter } = await import('./two-factor.ts');
 const { createUpdateService } = await import('./updates.ts');
@@ -35,6 +37,7 @@ const app = express();
 app.use(express.json());
 app.use('/api/auth', createAuthRouter((req) => String(req.headers['x-test-ip']), updateService));
 app.get('/api/protected', requireAuth, (_req, res) => res.json({ ok: true }));
+app.use('/api/dashboard', requireAuth, createDashboardRouter());
 app.use((err: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   res.status(err.status ?? 500).json({ error: err.message });
 });
@@ -64,9 +67,9 @@ after(async () => {
 class Browser {
   cookies = new Map<string, string>();
   ip = crypto.randomUUID();
-  async request(route: string, body?: unknown, ip = this.ip) {
+  async request(route: string, body?: unknown, ip = this.ip, method = body === undefined ? 'GET' : 'POST') {
     const response = await fetch(`${baseUrl}${route}`, {
-      method: body === undefined ? 'GET' : 'POST',
+      method,
       headers: { 'Content-Type': 'application/json', Cookie: [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; '), 'x-test-ip': ip },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -79,6 +82,7 @@ class Browser {
     return { status: response.status, body: await response.json(), cookies };
   }
   login() { return this.request('/auth/login', { email, password }); }
+  put(route: string, body: unknown) { return this.request(route, body, this.ip, 'PUT'); }
 }
 
 async function configured() {
@@ -349,4 +353,60 @@ test('TOTP accepts limited clock drift, rejects replay/old codes, and matches an
   assert.equal(totpCounter(secret, '287082', -1, 89_000), 1);
   assert.equal(totpCounter(secret, '287082', -1, 119_000), null);
   assert.equal(totpCounter(secret, 'not-a-code', -1, 59_000), null);
+});
+
+test('dashboard preferences require a full session for reads and writes', async () => {
+  const anonymous = new Browser();
+  assert.equal((await anonymous.request('/dashboard/layout')).status, 401);
+  assert.equal((await anonymous.put('/dashboard/layout', defaultDashboardLayout())).status, 401);
+  await enabled();
+  const pending = new Browser();
+  assert.equal((await pending.login()).body.twoFactorRequired, true);
+  assert.equal((await pending.request('/dashboard/layout')).status, 401);
+  assert.equal((await pending.put('/dashboard/layout', defaultDashboardLayout())).status, 401);
+});
+
+test('dashboard defaults, hidden widgets and reset persist across admin sessions', async () => {
+  const browser = await configured();
+  const defaults = defaultDashboardLayout();
+  assert.deepEqual((await browser.request('/dashboard/layout')).body, defaults);
+  const layout = defaultDashboardLayout();
+  for (const widget of Object.values(layout.widgets)) widget.visible = false;
+  assert.equal((await browser.put('/dashboard/layout', layout)).status, 200);
+  assert.deepEqual(JSON.parse(getSetting('admin_dashboard_layout')!), layout);
+  await browser.request('/auth/logout', {});
+  const secondDevice = new Browser();
+  assert.equal((await secondDevice.login()).status, 200);
+  assert.deepEqual((await secondDevice.request('/dashboard/layout')).body, layout);
+  assert.deepEqual((await secondDevice.put('/dashboard/layout', defaults)).body, defaults);
+  assert.deepEqual((await secondDevice.request('/dashboard/layout')).body, defaults);
+});
+
+test('malformed dashboard writes do not overwrite the saved layout', async () => {
+  const browser = await configured();
+  const layout = defaultDashboardLayout();
+  layout.widgets.history.visible = false;
+  await browser.put('/dashboard/layout', layout);
+  for (const invalid of [null, [], {}, { ...layout, version: 2 },
+    { ...layout, widgets: { history: { visible: 'false' } } },
+    { ...layout, widgets: { unknown: { visible: false } } },
+    { ...layout, widgets: { history: { visible: false, unexpected: 1 } } },
+    { ...layout, unexpected: true }]) {
+    assert.equal((await browser.put('/dashboard/layout', invalid)).status, 400);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, layout);
+  }
+});
+
+test('old and corrupt saved dashboard layouts get safe defaults for new widgets', async () => {
+  const browser = await configured();
+  const expected = defaultDashboardLayout();
+  expected.widgets.history.visible = false;
+  const legacy = { version: 1, widgets: { history: { visible: false }, retired: { visible: false } } };
+  setSetting('admin_dashboard_layout', JSON.stringify(legacy));
+  assert.deepEqual((await browser.request('/dashboard/layout')).body, expected);
+  assert.deepEqual((await browser.put('/dashboard/layout', { version: 1, widgets: { history: { visible: false } } })).body, expected);
+  for (const corrupt of ['not json', 'null', '{"version":2,"widgets":{}}']) {
+    setSetting('admin_dashboard_layout', corrupt);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, defaultDashboardLayout());
+  }
 });

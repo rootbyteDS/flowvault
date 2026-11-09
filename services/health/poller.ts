@@ -9,6 +9,8 @@ import { db, getSettings } from './db.ts';
 import { core, type CoreInstance } from './core.ts';
 import { evaluateInstance } from './evaluate.ts';
 import type { SlimExecution } from '../../shared/executions.ts';
+import { packError, renderMessage } from '../../shared/i18n/index.ts';
+import { t } from '../../shared/i18n/server.ts';
 
 const MAX_PAGES = 40; // höchstens 10.000 Ausführungen pro Durchgang
 const MAX_ERROR_PAGES = 8; // höchstens 200 Fehler mit Details pro Durchgang
@@ -101,9 +103,9 @@ export async function pollInstance(inst: CoreInstance) {
     db.prepare('UPDATE poll_state SET last_poll_at = ?, ok = 1, error = NULL WHERE instance_id = ?').run(Date.now(), inst.id);
     if (all.stored || errs.stored) await evaluateInstance(inst.id, inst.name);
   } catch (e) {
-    const msg = (e as Error).message;
+    const msg = packError(e);
     db.prepare('UPDATE poll_state SET last_poll_at = ?, ok = 0, error = ? WHERE instance_id = ?').run(Date.now(), msg, inst.id);
-    console.warn(`[health] Instanz ${inst.id}: ${msg}`);
+    console.warn(t('log.healthInstance', { id: inst.id, reason: renderMessage(msg, t) }));
   } finally {
     running.delete(inst.id);
   }
@@ -132,7 +134,7 @@ export async function pollAll(force = false) {
 }
 
 export function startScheduler() {
-  const tick = () => pollAll().catch((e) => console.warn(`[health] ${(e as Error).message}`));
+  const tick = () => pollAll().catch((e) => console.warn(`[health] ${renderMessage(packError(e), t)}`));
   setTimeout(tick, 5_000);
   return setInterval(tick, 60_000);
 }

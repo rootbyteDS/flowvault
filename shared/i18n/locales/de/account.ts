@@ -1,0 +1,85 @@
+/** Admin-Konto, Zwei-Faktor-Authentifizierung und „Über FlowVault“ (Version/Updates). */
+export const account = {
+  loading: 'Admin-Konto wird geladen …',
+  proof: {
+    password: 'Aktuelles Passwort',
+    factor: 'Authenticator- oder Wiederherstellungscode',
+    factorHint: 'Verwende für jede Bestätigung einen neuen Code. App-Codes wechseln alle 30 Sekunden.',
+  },
+  email: {
+    title: 'Admin-Konto',
+    text: 'Ein Admin-Konto für diese FlowVault-Installation. Die E-Mail dient zur Anmeldung; es werden keine E-Mails versendet.',
+    fromEnv: '{email} – gesetzt über <code>ADMIN_EMAIL</code>.',
+    save: 'E-Mail speichern',
+    changed: 'Admin-E-Mail geändert. Andere Geräte wurden abgemeldet.',
+  },
+  password: {
+    title: 'Passwort ändern',
+    fromEnv: 'Das Passwort wird über <code>ADMIN_PASSWORD</code> gesetzt.',
+    new: 'Neues Passwort',
+    repeat: 'Neues Passwort wiederholen',
+    save: 'Passwort speichern',
+    changed: 'Passwort geändert. Andere Geräte wurden abgemeldet.',
+  },
+  recovery: {
+    intro:
+      'Diese zehn Codes werden nur jetzt angezeigt. Bewahre sie sicher und getrennt von deinem Passwort auf. Jeder Code ersetzt einmalig den Authenticator-Code; dein Passwort bleibt erforderlich.',
+    download: 'Codes herunterladen',
+    confirm: 'Ich habe die Wiederherstellungscodes sicher gespeichert.',
+    done: 'Fertig',
+    fileTitle: 'FlowVault – Wiederherstellungscodes',
+    fileText: 'Jeder Code kann nur einmal verwendet werden. Sicher getrennt vom Passwort aufbewahren.',
+    fileName: 'flowvault-wiederherstellungscodes.txt',
+  },
+  twoFactor: {
+    title: 'Zwei-Faktor-Authentifizierung',
+    on: 'Aktiv',
+    off: 'Nicht aktiviert',
+    text: 'Schütze dein Admin-Konto zusätzlich mit einer Authenticator-App. Dafür ist kein Mailversand nötig.',
+    setupTitle: '2FA einrichten',
+    disableTitle: '2FA deaktivieren',
+    recoveryTitle: 'Wiederherstellungscodes erneuern',
+    scan: 'Scanne den QR-Code mit deiner Authenticator-App und bestätige mit dem angezeigten Code. Die Einrichtung ist zehn Minuten gültig.',
+    qrAlt: 'QR-Code zum Einrichten von FlowVault in einer Authenticator-App',
+    manualKey: 'Schlüssel für die manuelle Eingabe',
+    recoveryWarning: 'Alle bisherigen Wiederherstellungscodes werden ungültig. Die neuen Codes werden einmalig angezeigt.',
+    createQr: 'QR-Code erstellen',
+    enable: '2FA aktivieren',
+    disable: '2FA deaktivieren',
+    newCodes: 'Neue Codes erstellen',
+    newCodesButton: 'Neue Wiederherstellungscodes',
+    codesRemaining: {
+      one: '{count} Wiederherstellungscode übrig. Bei Verlust deines Handys kannst du damit weiter auf dein Konto zugreifen.',
+      other: '{count} Wiederherstellungscodes übrig. Bei Verlust deines Handys kannst du damit weiter auf dein Konto zugreifen.',
+    },
+    disabled: '2FA deaktiviert. Andere Geräte wurden abgemeldet.',
+    enabled: '2FA aktiviert. Sichere jetzt deine Wiederherstellungscodes.',
+    codesCreated: 'Neue Codes erstellt. Alle bisherigen Codes sind ungültig.',
+  },
+};
+
+export const system = {
+  title: 'Über FlowVault',
+  reload: 'Erneut laden',
+  loading: 'Versionsinformationen werden geladen …',
+  version: 'Installierte Version',
+  commit: 'Git-Commit',
+  noCommit: 'Nicht im Build hinterlegt',
+  modified: 'mit lokalen Änderungen',
+  builtAt: 'Build erstellt',
+  updates: 'Updates',
+  hookConnected: 'Update-Auslöser verbunden',
+  manual: 'Manuelles Update',
+  textEnabled:
+    'Fordere ein Update bei deinem Deployment-Dienst an. Beim Austausch des Containers ist FlowVault kurz nicht erreichbar. Ob ein neuer Stand verfügbar ist, wird hier nicht automatisch geprüft.',
+  textInvalid: 'Die Verbindung zum Update-Dienst ist ungültig konfiguriert. Bitte die Deployment-Konfiguration prüfen.',
+  textManual:
+    'Bei Docker/Arcane installierst du Updates über einen neuen Build und ein anschließendes Deployment. Für den Update-Button muss einmalig ein Deployment-Webhook verbunden werden.',
+  accepted:
+    'Update-Anfrage um {time} angenommen. Das bestätigt den Auslöser, noch nicht die Installation. Prüfe den Verlauf in deinem Deployment-Dienst und lade FlowVault danach neu.',
+  reloadApp: 'FlowVault neu laden',
+  requestNow: 'Update jetzt anfordern',
+  request: 'Update anfordern',
+  openDeployment: 'Deployment öffnen ↗',
+  guide: 'Update-Anleitung ↗',
+};

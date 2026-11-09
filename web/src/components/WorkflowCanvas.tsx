@@ -5,6 +5,7 @@ import type { FailingNode } from '../../../shared/executions.ts';
 import { nodeVisual } from './changes.tsx';
 import { InfoTip } from './ui.tsx';
 import { cx, shortType } from '../util.ts';
+import { paragraphs, t as tr } from '../i18n.tsx';
 
 export interface CanvasNode {
   key: string;
@@ -271,7 +272,7 @@ export function WorkflowCanvas({
                 className="cursor-pointer"
                 style={{ opacity: n.status === 'removed' ? 0.75 : n.node.disabled ? 0.5 : 1 }}
               >
-                <title>{`${n.node.name}\n${n.node.type}${fail ? `\n${fail.failed}× gescheitert (${Math.round(fail.rate * 100)} % der Läufe)${fail.lastMessage ? `\n${fail.lastMessage}` : ''}` : ''}`}</title>
+                <title>{`${n.node.name}\n${n.node.type}${fail ? `\n${tr('canvas.nodeFailed', { count: fail.failed, percent: Math.round(fail.rate * 100) })}${fail.lastMessage ? `\n${fail.lastMessage}` : ''}` : ''}`}</title>
                 {fail && (
                   <rect x={-5} y={-5} width={W + 10} height={H + 10} rx={14} style={{
                     fill: 'color-mix(in srgb, var(--color-del) 7%, transparent)',
@@ -325,35 +326,32 @@ export function WorkflowCanvas({
         </g>
       </svg>
 
-      {!nodes.length && <div className="absolute inset-0 grid place-items-center text-sm text-muted">Dieser Workflow hat keine Nodes.</div>}
+      {!nodes.length && <div className="absolute inset-0 grid place-items-center text-sm text-muted">{tr('canvas.noNodes')}</div>}
 
       <div className="absolute right-3 bottom-3 flex flex-col overflow-hidden rounded-lg border border-line-2 bg-panel" onPointerDown={(e) => e.stopPropagation()}>
-        <button className="p-2 text-muted transition-colors hover:bg-panel-3 hover:text-text" onClick={() => zoom(1.25)} title="Vergrößern"><ZoomIn className="size-4" /></button>
-        <button className="p-2 text-muted transition-colors hover:bg-panel-3 hover:text-text" onClick={() => zoom(0.8)} title="Verkleinern"><ZoomOut className="size-4" /></button>
-        <button className="border-t border-line p-2 text-muted transition-colors hover:bg-panel-3 hover:text-text" onClick={fit} title="Einpassen"><Maximize2 className="size-4" /></button>
+        <button className="p-2 text-muted transition-colors hover:bg-panel-3 hover:text-text" onClick={() => zoom(1.25)} title={tr('canvas.zoomIn')}><ZoomIn className="size-4" /></button>
+        <button className="p-2 text-muted transition-colors hover:bg-panel-3 hover:text-text" onClick={() => zoom(0.8)} title={tr('canvas.zoomOut')}><ZoomOut className="size-4" /></button>
+        <button className="border-t border-line p-2 text-muted transition-colors hover:bg-panel-3 hover:text-text" onClick={fit} title={tr('canvas.fit')}><Maximize2 className="size-4" /></button>
       </div>
 
       {(showLegend || failingByName.size > 0) && (
         <div className="absolute top-3 left-3 flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-line-2 bg-panel px-3 py-2 text-xs text-muted" onPointerDown={(e) => e.stopPropagation()}>
           {showLegend && (
             <>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-add" />Hinzugefügt</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-mod" />Geändert</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-del" />Entfernt</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-add" />{tr('diff.status.added')}</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-mod" />{tr('diff.status.modified')}</span>
+              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-del" />{tr('diff.status.removed')}</span>
             </>
           )}
           {failingByName.size > 0 && (
             <>
               {[...failingByName.values()].some((f) => f.isNew) && (
-                <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-[3px] border border-del" />Scheitert neu seit dieser Version</span>
+                <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-[3px] border border-del" />{tr('canvas.legendNew')}</span>
               )}
               {[...failingByName.values()].some((f) => !f.isNew) && (
-                <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-[3px] border border-dashed border-del" />Scheiterte schon vorher</span>
+                <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-[3px] border border-dashed border-del" />{tr('canvas.legendBefore')}</span>
               )}
-              <InfoTip label="Rote Umrandung">
-                <p>Rot umrandete Nodes sind bei Ausführungen dieser Version in n8n gescheitert. Fahr mit der Maus über einen Node für Anzahl und letzte Fehlermeldung.</p>
-                <p><b>Durchgezogen</b>: scheitert erst seit dieser Version. <b>Gestrichelt</b>: scheiterte schon in den Versionen davor.</p>
-              </InfoTip>
+              <InfoTip label={tr('canvas.redOutline')}>{paragraphs('canvas.redOutlineTip')}</InfoTip>
             </>
           )}
         </div>

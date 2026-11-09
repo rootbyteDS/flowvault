@@ -7,6 +7,8 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import './index.css';
 import { api } from './api.ts';
+import { I18nProvider, t, useI18n } from './i18n.tsx';
+import { isLocale } from '../../shared/i18n/index.ts';
 import { Layout } from './components/Layout.tsx';
 import { PageLoader, ToastProvider } from './components/ui.tsx';
 import { Login } from './pages/Login.tsx';
@@ -23,7 +25,15 @@ import { SettingsPage } from './pages/Settings.tsx';
 
 function App() {
   const [auth, setAuth] = useState<AuthStatus>();
-  const check = useCallback(() => api<AuthStatus>('/auth/status').then(setAuth), []);
+  const { setServerDefault } = useI18n();
+  const check = useCallback(
+    () =>
+      api<AuthStatus>('/auth/status').then((a) => {
+        setServerDefault(isLocale(a.defaultLanguage) ? a.defaultLanguage : undefined);
+        setAuth(a);
+      }),
+    [setServerDefault],
+  );
 
   useEffect(() => {
     check();
@@ -47,7 +57,7 @@ function App() {
         <Route path="compare" element={<Compare />} />
         <Route path="activity" element={<ActivityPage />} />
         <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<div className="py-20 text-center text-muted">Seite nicht gefunden.</div>} />
+        <Route path="*" element={<div className="py-20 text-center text-muted">{t('common.pageNotFound')}</div>} />
       </Route>
     </Routes>
   );
@@ -55,10 +65,12 @@ function App() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
-    </BrowserRouter>
+    <I18nProvider>
+      <BrowserRouter>
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      </BrowserRouter>
+    </I18nProvider>
   </StrictMode>,
 );

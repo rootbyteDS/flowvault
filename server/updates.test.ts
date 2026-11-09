@@ -58,6 +58,7 @@ test('remote errors, redirects and timeouts never leak credentials or imply inst
     const service = createUpdateService(env, async () => new Response('private-token', { status }));
     await assert.rejects(service.trigger(), (err: Error & { status?: number }) => {
       assert.equal(err.status, 502);
+      assert.deepEqual((err as Error & { params?: unknown }).params, { status });
       assert.match(err.message, new RegExp(`HTTP ${status}`));
       assert.equal(err.message.includes('private-'), false);
       return true;
@@ -67,7 +68,8 @@ test('remote errors, redirects and timeouts never leak credentials or imply inst
   const disconnected = createUpdateService(env, async () => { attempts++; throw new Error(`${url} private-token`); });
   await assert.rejects(disconnected.trigger(), (err: Error & { status?: number }) => {
     assert.equal(err.status, 502);
-    assert.match(err.message, /unklar/);
+    // Sprachunabhängig prüfen: Der Schlüssel entscheidet, nicht der Wortlaut in der Server-Sprache
+    assert.equal((err as Error & { key?: string }).key, 'errors.update.noConfirmation');
     assert.equal(err.message.includes('private-'), false);
     return true;
   });

@@ -6,9 +6,16 @@ import { ActivityRow } from '../components/changes.tsx';
 import { InstanceForm } from '../components/InstanceForm.tsx';
 import { WorkflowTable } from '../components/WorkflowTable.tsx';
 import { Badge, Button, Card, EmptyState, ErrorBox, Modal, PageHeader, PageLoader, Segmented, StatusDot, Tabs, inputCls, useToast } from '../components/ui.tsx';
-import { cx, formatDate, intervalLabel, timeAgo } from '../util.ts';
+import { cx, formatDate, formatNumber, intervalLabel, timeAgo } from '../util.ts';
+import { message, rich, t, type MessageKey } from '../i18n.tsx';
 
 type Tab = 'workflows' | 'activity' | 'runs';
+
+const TRIGGER_KEYS: Record<string, MessageKey> = {
+  manual: 'instances.detail.trigger.manual',
+  schedule: 'instances.detail.trigger.schedule',
+  restore: 'instances.detail.trigger.restore',
+};
 
 export function InstanceDetail() {
   const { id } = useParams();
@@ -26,7 +33,7 @@ export function InstanceDetail() {
 
   const filtered = useMemo(() => {
     const s = q.toLowerCase();
-    return (workflows.data ?? []).filter((w) => !s || w.name.toLowerCase().includes(s) || w.tags.some((t) => t.toLowerCase().includes(s)));
+    return (workflows.data ?? []).filter((w) => !s || w.name.toLowerCase().includes(s) || w.tags.some((tag) => tag.toLowerCase().includes(s)));
   }, [workflows.data, q]);
 
   if (inst.loading && !inst.data) return <PageLoader />;
@@ -37,7 +44,7 @@ export function InstanceDetail() {
     setSyncing(true);
     try {
       const r = await api<{ created: number; changed: number; deleted: number }>(`/instances/${id}/sync`, { method: 'POST' });
-      toast(`Gesichert: ${r.created} neu, ${r.changed} geändert, ${r.deleted} gelöscht`);
+      toast(t('instances.detail.synced', r));
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -50,52 +57,52 @@ export function InstanceDetail() {
 
   async function toggleEnabled() {
     await api(`/instances/${id}`, { method: 'PUT', body: { enabled: !i.enabled } });
-    toast(i.enabled ? 'Automatische Sicherung pausiert' : 'Automatische Sicherung fortgesetzt');
+    toast(t(i.enabled ? 'instances.detail.pausedToast' : 'instances.detail.resumedToast'));
     inst.reload();
   }
 
   async function remove() {
     await api(`/instances/${id}`, { method: 'DELETE' });
-    toast(`„${i.name}“ und alle gesicherten Versionen wurden entfernt`);
+    toast(t('instances.detail.removed', { name: i.name }));
     nav('/instances');
   }
 
   return (
     <>
       <PageHeader
-        eyebrow={<Link to="/instances" className="hover:text-text">Instanzen</Link>}
+        eyebrow={<Link to="/instances" className="hover:text-text">{t('nav.instances')}</Link>}
         title={
           <span className="flex items-center gap-3">
             <span className="size-2.5 rounded-[3px]" style={{ background: i.color }} />
             {i.name}
-            {!i.enabled && <Badge>Pausiert</Badge>}
+            {!i.enabled && <Badge>{t('instances.paused')}</Badge>}
           </span>
         }
         subtitle={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <a href={i.base_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-text">{i.base_url}<ExternalLink className="size-3" /></a>
-            <span className="flex items-center gap-1.5"><StatusDot ok={i.last_sync_ok} syncing={i.syncing} />{i.syncing ? 'Sichert …' : `Gesichert ${timeAgo(i.last_sync_at)}`}</span>
+            <span className="flex items-center gap-1.5"><StatusDot ok={i.last_sync_ok} syncing={i.syncing} />{i.syncing ? t('instances.detail.syncing') : t('instances.backedUp', { when: timeAgo(i.last_sync_at) })}</span>
             <span>{intervalLabel(i.sync_interval)}</span>
           </span>
         }
         actions={
           <>
-            <Button variant="ghost" icon={i.enabled ? <Pause className="size-4" /> : <Play className="size-4" />} onClick={toggleEnabled}>{i.enabled ? 'Pausieren' : 'Fortsetzen'}</Button>
-            <Button variant="ghost" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>Bearbeiten</Button>
-            <Button variant="primary" icon={<RefreshCw className={cx('size-4', (syncing || i.syncing) && 'animate-spin')} />} onClick={sync} disabled={syncing || i.syncing}>Jetzt sichern</Button>
+            <Button variant="ghost" icon={i.enabled ? <Pause className="size-4" /> : <Play className="size-4" />} onClick={toggleEnabled}>{t(i.enabled ? 'instances.detail.pause' : 'instances.detail.resume')}</Button>
+            <Button variant="ghost" icon={<Pencil className="size-4" />} onClick={() => setEditing(true)}>{t('instances.edit')}</Button>
+            <Button variant="primary" icon={<RefreshCw className={cx('size-4', (syncing || i.syncing) && 'animate-spin')} />} onClick={sync} disabled={syncing || i.syncing}>{t('instances.syncNow')}</Button>
           </>
         }
       />
 
-      {i.last_sync_error && <div className="mb-5"><ErrorBox><b>Letzter Sync fehlgeschlagen:</b> {i.last_sync_error}</ErrorBox></div>}
+      {i.last_sync_error && <div className="mb-5"><ErrorBox>{rich('instances.detail.failedBanner', { b: (c) => <b>{c}</b> }, { error: message(i.last_sync_error) })}</ErrorBox></div>}
 
       <Tabs<Tab>
         value={tab}
         onChange={setTab}
         tabs={[
-          { value: 'workflows', label: <>Workflows <span className="font-mono text-xs text-dim">{i.workflows}</span></> },
-          { value: 'activity', label: 'Aktivität' },
-          { value: 'runs', label: 'Sync-Protokoll' },
+          { value: 'workflows', label: <>{t('nav.workflows')} <span className="font-mono text-xs text-dim">{i.workflows}</span></> },
+          { value: 'activity', label: t('nav.activity') },
+          { value: 'runs', label: t('instances.detail.tabRuns') },
         ]}
       />
 
@@ -105,23 +112,23 @@ export function InstanceDetail() {
             <div className="flex flex-wrap items-center gap-3 border-b border-line p-3">
               <div className="relative min-w-[200px] flex-1">
                 <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-dim" />
-                <input className={cx(inputCls, 'pl-9')} placeholder="Suchen" value={q} onChange={(e) => setQ(e.target.value)} />
+                <input className={cx(inputCls, 'pl-9')} placeholder={t('instances.detail.search')} value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
               <Segmented
                 value={status}
                 onChange={setStatus}
                 options={[
-                  { value: 'present', label: 'Vorhanden' },
-                  { value: 'active', label: 'Aktiv' },
-                  { value: 'deleted', label: 'Gelöscht' },
-                  { value: 'all', label: 'Alle' },
+                  { value: 'present', label: t('workflows.status.present') },
+                  { value: 'active', label: t('workflows.status.active') },
+                  { value: 'deleted', label: t('workflows.status.deleted') },
+                  { value: 'all', label: t('workflows.status.all') },
                 ]}
               />
             </div>
             {workflows.loading && !workflows.data ? <PageLoader /> : filtered.length ? (
               <WorkflowTable items={filtered} showInstance={false} />
             ) : (
-              <EmptyState icon={<Workflow className="size-6" />} title={i.syncing ? 'Erste Sicherung läuft …' : 'Keine Workflows gefunden'} />
+              <EmptyState icon={<Workflow className="size-6" />} title={t(i.syncing ? 'instances.detail.firstBackup' : 'workflows.empty')} />
             )}
           </Card>
         )}
@@ -129,7 +136,7 @@ export function InstanceDetail() {
         {tab === 'activity' && (
           <Card className="divide-y divide-line">
             {activity.data?.map((a) => <ActivityRow key={a.id} a={a} />)}
-            {activity.data?.length === 0 && <div className="px-4 py-10 text-center text-sm text-muted">Noch keine Aktivität</div>}
+            {activity.data?.length === 0 && <div className="px-4 py-10 text-center text-sm text-muted">{t('activity.empty')}</div>}
           </Card>
         )}
 
@@ -138,36 +145,36 @@ export function InstanceDetail() {
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-dim">
-                  <th className="px-4 py-3 font-normal">Zeitpunkt</th>
-                  <th className="px-4 py-3 font-normal">Auslöser</th>
-                  <th className="px-4 py-3 font-normal">Ergebnis</th>
-                  <th className="px-4 py-3 text-right font-normal">Dauer</th>
+                  <th className="px-4 py-3 font-normal">{t('instances.detail.col.time')}</th>
+                  <th className="px-4 py-3 font-normal">{t('instances.detail.col.trigger')}</th>
+                  <th className="px-4 py-3 font-normal">{t('instances.detail.col.result')}</th>
+                  <th className="px-4 py-3 text-right font-normal">{t('instances.detail.col.duration')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
                 {i.runs.map((r) => (
                   <tr key={r.id}>
                     <td className="px-4 py-2.5 whitespace-nowrap">{formatDate(r.started_at, true)}</td>
-                    <td className="px-4 py-2.5 text-muted">{{ manual: 'Manuell', schedule: 'Automatisch', restore: 'Wiederherstellung' }[r.trigger] ?? r.trigger}</td>
+                    <td className="px-4 py-2.5 text-muted">{TRIGGER_KEYS[r.trigger] ? t(TRIGGER_KEYS[r.trigger]!) : r.trigger}</td>
                     <td className="px-4 py-2.5">
-                      {r.ok === null ? <span className="text-[13px] text-muted">Läuft</span> : r.ok ? (
+                      {r.ok === null ? <span className="text-[13px] text-muted">{t('instances.detail.running')}</span> : r.ok ? (
                         <span className="flex flex-wrap items-center gap-2 text-[13px]">
                           <span className="size-1.5 rounded-full bg-add" />
-                          <span className="text-muted">{r.total} Workflows</span>
-                          {r.created > 0 && <span className="text-text">{r.created} neu</span>}
-                          {r.changed > 0 && <span className="text-mod">{r.changed} geändert</span>}
-                          {r.deleted > 0 && <span className="text-del">{r.deleted} gelöscht</span>}
+                          <span className="text-muted">{t('dashboard.workflowCount', { count: r.total })}</span>
+                          {r.created > 0 && <span className="text-text">{t('instances.detail.runNew', { count: r.created })}</span>}
+                          {r.changed > 0 && <span className="text-mod">{t('instances.detail.runChanged', { count: r.changed })}</span>}
+                          {r.deleted > 0 && <span className="text-del">{t('instances.detail.runDeleted', { count: r.deleted })}</span>}
                         </span>
                       ) : (
-                        <span className="flex items-center gap-2 text-[13px] text-del"><span className="size-1.5 shrink-0 rounded-full bg-del" /><span className="truncate">{r.error}</span></span>
+                        <span className="flex items-center gap-2 text-[13px] text-del"><span className="size-1.5 shrink-0 rounded-full bg-del" /><span className="truncate">{message(r.error)}</span></span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-xs text-muted">{r.finished_at ? `${((r.finished_at - r.started_at) / 1000).toFixed(1)}s` : '–'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-xs text-muted">{r.finished_at ? `${formatNumber((r.finished_at - r.started_at) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s` : '–'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {i.runs.length === 0 && <div className="px-4 py-10 text-center text-sm text-muted">Noch keine Sync-Läufe</div>}
+            {i.runs.length === 0 && <div className="px-4 py-10 text-center text-sm text-muted">{t('instances.detail.noRuns')}</div>}
           </Card>
         )}
       </div>
@@ -175,10 +182,10 @@ export function InstanceDetail() {
       <div className="mt-10 rounded-xl border border-del/25 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-medium">Instanz entfernen</div>
-            <div className="text-xs text-muted">Löscht die Verbindung und alle gesicherten Versionen in FlowVault. Deine n8n-Instanz bleibt unberührt.</div>
+            <div className="text-sm font-medium">{t('instances.detail.removeTitle')}</div>
+            <div className="text-xs text-muted">{t('instances.detail.removeText')}</div>
           </div>
-          <Button variant="danger" size="sm" icon={<Trash2 className="size-4" />} onClick={() => setConfirmDelete(true)}>Entfernen</Button>
+          <Button variant="danger" size="sm" icon={<Trash2 className="size-4" />} onClick={() => setConfirmDelete(true)}>{t('instances.detail.removeButton')}</Button>
         </div>
       </div>
 
@@ -186,11 +193,13 @@ export function InstanceDetail() {
       <Modal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title="Instanz wirklich entfernen?"
-        footer={<><Button variant="ghost" onClick={() => setConfirmDelete(false)}>Abbrechen</Button><Button variant="danger" onClick={remove}>Endgültig entfernen</Button></>}
+        title={t('instances.detail.confirmTitle')}
+        footer={<><Button variant="ghost" onClick={() => setConfirmDelete(false)}>{t('common.cancel')}</Button><Button variant="danger" onClick={remove}>{t('instances.detail.confirmButton')}</Button></>}
       >
         <p className="text-sm text-muted">
-          Alle <b className="text-text">{i.versions} Versionen</b> von <b className="text-text">{i.workflows + i.deleted_workflows} Workflows</b> aus „{i.name}“ werden aus FlowVault gelöscht. Das kann nicht rückgängig gemacht werden.
+          {rich('instances.detail.confirmText', { b: (c) => <b className="text-text">{c}</b> }, {
+            versions: t('dashboard.versionCount', { count: i.versions }), workflows: t('dashboard.workflowCount', { count: i.workflows + i.deleted_workflows }), name: i.name,
+          })}
         </p>
       </Modal>
     </>

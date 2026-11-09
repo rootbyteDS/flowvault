@@ -5,7 +5,7 @@ import {
   Trash2, Upload,
 } from 'lucide-react';
 import {
-  api, useApi, MAPPING_KIND_LABEL,
+  api, useApi, mappingKindLabel,
   type Instance, type DriftRow, type MappingKind, type MappingRow, type MappingSuggestion,
   type PromoteDiff, type PromoteOutcome, type PromoteOverview,
 } from '../api.ts';
@@ -15,14 +15,15 @@ import {
   Badge, Button, Card, EmptyState, ErrorBox, Field, Modal, PageHeader, PageLoader, Segmented, Tabs, inputCls, useToast,
 } from '../components/ui.tsx';
 import { cx, timeAgo } from '../util.ts';
+import { message, rich, t, type MessageKey } from '../i18n.tsx';
 
 type Filter = 'drifted' | 'only-source' | 'only-target' | 'in-sync' | 'all';
 
-const STATUS: Record<DriftRow['status'], { label: string; tone: 'add' | 'mod' | 'info' | 'neutral' }> = {
-  drifted: { label: 'weicht ab', tone: 'mod' },
-  'in-sync': { label: 'aktuell', tone: 'add' },
-  'only-source': { label: 'fehlt auf Ziel', tone: 'info' },
-  'only-target': { label: 'fehlt auf Quelle', tone: 'neutral' },
+const STATUS: Record<DriftRow['status'], { label: MessageKey; tone: 'add' | 'mod' | 'info' | 'neutral' }> = {
+  drifted: { label: 'promote.status.drifted', tone: 'mod' },
+  'in-sync': { label: 'promote.status.inSync', tone: 'add' },
+  'only-source': { label: 'promote.status.onlySource', tone: 'info' },
+  'only-target': { label: 'promote.status.onlyTarget', tone: 'neutral' },
 };
 
 export function Promote() {
@@ -64,11 +65,11 @@ export function Promote() {
   if ((instances.data?.length ?? 0) < 2) {
     return (
       <>
-        <PageHeader title="Umgebungen" subtitle="Workflows zwischen Staging und Produktion übernehmen – mit automatischer ID-Zuordnung" />
+        <PageHeader title={t('nav.environments')} subtitle={t('promote.subtitleShort')} />
         <Card>
-          <EmptyState icon={<Layers className="size-6" />} title="Mindestens zwei Instanzen nötig">
-            Umgebungen vergleichen zwei n8n-Instanzen miteinander, z. B. Staging und Produktion.
-            <div className="mt-6"><Link to="/instances" className="text-sm text-accent-hi hover:underline">Instanz verbinden →</Link></div>
+          <EmptyState icon={<Layers className="size-6" />} title={t('promote.needTwoTitle')}>
+            {t('promote.needTwoText')}
+            <div className="mt-6"><Link to="/instances" className="text-sm text-accent-hi hover:underline">{t('promote.connectLink')}</Link></div>
           </EmptyState>
         </Card>
       </>
@@ -80,22 +81,22 @@ export function Promote() {
   return (
     <>
       <PageHeader
-        title="Umgebungen"
-        subtitle="Workflows zwischen Staging und Produktion übernehmen – FlowVault ersetzt Credentials, Sub-Workflow-IDs, Data-Tables und Webhook-Pfade anhand gespeicherter Zuordnungen."
+        title={t('nav.environments')}
+        subtitle={t('promote.subtitle')}
       />
 
       {/* Instanz-Paar */}
       <Card className="mb-6 p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
-          <PairSelect label="Quelle" which="from" value={from} instances={instances.data!} />
+          <PairSelect label={t('promote.source')} which="from" value={from} instances={instances.data!} />
           <Button
             variant="ghost"
             className="self-center"
-            title="Richtung tauschen (Zuordnungen sind pro Richtung gespeichert)"
+            title={t('promote.swapTitle')}
             icon={<ArrowLeftRight className="size-4" />}
             onClick={swap}
           />
-          <PairSelect label="Ziel" which="to" value={to} instances={instances.data!} />
+          <PairSelect label={t('promote.target')} which="to" value={to} instances={instances.data!} />
         </div>
       </Card>
 
@@ -103,8 +104,8 @@ export function Promote() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { value: 'drift', label: <span className="flex items-center gap-2">Abweichungen {ov.data.drift.counts.drifted > 0 && <Badge tone="mod">{ov.data.drift.counts.drifted}</Badge>}</span> },
-          { value: 'mappings', label: <span className="flex items-center gap-2">Zuordnungen <Badge>{ov.data.mappings.length}</Badge></span> },
+          { value: 'drift', label: <span className="flex items-center gap-2">{t('promote.tabDrift')} {ov.data.drift.counts.drifted > 0 && <Badge tone="mod">{ov.data.drift.counts.drifted}</Badge>}</span> },
+          { value: 'mappings', label: <span className="flex items-center gap-2">{t('promote.tabMappings')} <Badge>{ov.data.mappings.length}</Badge></span> },
         ]}
       />
 
@@ -137,7 +138,7 @@ function PairSelect({ label, which, value, instances }: { label: string; which: 
       >
         {instances.map((i) => (
           <option key={i.id} value={i.id}>
-            {i.name} · {i.workflows} Workflows
+            {i.name} · {t('dashboard.workflowCount', { count: i.workflows })}
           </option>
         ))}
       </select>
@@ -184,9 +185,9 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
   const promoteAllRow = pending.length > 1 && (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div className="text-sm text-muted">
-        {c.drifted} weichen ab, {c.onlySource} fehlen auf dem Ziel, {c.inSync} sind aktuell
+        {t('promote.summary', { drifted: c.drifted, onlySource: c.onlySource, inSync: c.inSync })}
       </div>
-      <Button size="sm" icon={<Upload className="size-4" />} onClick={() => setConfirm(pending)}>Alle übernehmen</Button>
+      <Button size="sm" icon={<Upload className="size-4" />} onClick={() => setConfirm(pending)}>{t('promote.promoteAll')}</Button>
     </div>
   );
 
@@ -196,11 +197,11 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
         value={filter}
         onChange={setFilter}
         options={[
-          { value: 'drifted', label: `Abweichend ${c.drifted}` },
-          { value: 'only-source', label: `Fehlt auf Ziel ${c.onlySource}` },
-          { value: 'only-target', label: `Fehlt auf Quelle ${c.onlyTarget}` },
-          { value: 'in-sync', label: `Aktuell ${c.inSync}` },
-          { value: 'all', label: 'Alle' },
+          { value: 'drifted', label: t('promote.filter.drifted', { count: c.drifted }) },
+          { value: 'only-source', label: t('promote.filter.onlySource', { count: c.onlySource }) },
+          { value: 'only-target', label: t('promote.filter.onlyTarget', { count: c.onlyTarget }) },
+          { value: 'in-sync', label: t('promote.filter.inSync', { count: c.inSync }) },
+          { value: 'all', label: t('promote.filter.all') },
         ]}
       />
 
@@ -210,12 +211,12 @@ function DriftTab({ data, rows, filter, setFilter, reload, setData }: {
         <Card>
           <EmptyState
             icon={<CircleCheck className="size-6" />}
-            title={filter === 'drifted' ? 'Keine Abweichungen' : 'Nichts zu sehen'}
-            action={<Button size="sm" variant="ghost" icon={<RefreshCw className="size-4" />} onClick={() => void reload()}>Neu laden</Button>}
+            title={t(filter === 'drifted' ? 'promote.empty.noDrift' : 'promote.empty.nothing')}
+            action={<Button size="sm" variant="ghost" icon={<RefreshCw className="size-4" />} onClick={() => void reload()}>{t('promote.empty.reload')}</Button>}
           >
             {filter === 'drifted'
-              ? `${data.target.name} entspricht ${data.source.name} in allen gemeinsamen Workflows (nach Anwendung der Zuordnungen).`
-              : 'Keine Workflows in dieser Auswahl.'}
+              ? t('promote.empty.noDriftText', { target: data.target.name, source: data.source.name })
+              : t('promote.empty.noneInSelection')}
           </EmptyState>
         </Card>
       ) : (
@@ -262,9 +263,9 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
   const swap = () => {
     const p = new URLSearchParams(params);
     const f = p.get('from');
-    const t = p.get('to');
-    if (!f || !t) return;
-    p.set('from', t);
+    const target = p.get('to');
+    if (!f || !target) return;
+    p.set('from', target);
     p.set('to', f);
     setParams(p, { replace: true });
   };
@@ -275,23 +276,23 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate text-sm font-medium">{name}</span>
-          <Badge tone={st.tone}>{st.label}</Badge>
+          <Badge tone={st.tone}>{t(st.label)}</Badge>
           {row.activeDiffers && (
-            <span title="Aktiv-Status weicht ab – läßt sich per Übernahme nicht ändern (n8n-API)">
-              <Badge>aktiv ≠</Badge>
+            <span title={t('promote.row.activeDiffersTitle')}>
+              <Badge>{t('promote.row.activeDiffers')}</Badge>
             </span>
           )}
           {row.matchedBy === 'mapping' && row.source && row.target && row.source.name !== row.target.name && (
-            <span className="text-xs text-dim">auf dem Ziel: „{row.target.name}“</span>
+            <span className="text-xs text-dim">{t('promote.row.onTarget', { name: row.target.name })}</span>
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-dim">
-          {row.source && <span>Quelle v{row.source.versionNumber} · {timeAgo(row.source.lastChangeAt)}</span>}
-          {row.target && <span>Ziel v{row.target.versionNumber} · {timeAgo(row.target.lastChangeAt)}</span>}
+          {row.source && <span>{t('promote.row.sourceInfo', { number: row.source.versionNumber, when: timeAgo(row.source.lastChangeAt) })}</span>}
+          {row.target && <span>{t('promote.row.targetInfo', { number: row.target.versionNumber, when: timeAgo(row.target.lastChangeAt) })}</span>}
           {row.missing.length > 0 && (
             <span className="inline-flex items-center gap-1 text-mod">
               <AlertTriangle className="size-3.5" />
-              {row.missing.length} ohne Zuordnung
+              {t('promote.row.unmapped', { count: row.missing.length })}
             </span>
           )}
         </div>
@@ -301,7 +302,7 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
         {row.summary && <ChangeChips s={row.summary} />}
         {row.status === 'drifted' && (
           <span className={cx('text-xs', row.ahead === 'source' ? 'text-info' : 'text-mod')}>
-            {row.ahead === 'source' ? `neuer auf ${sourceName}` : `neuer auf ${targetName}`}
+            {t('promote.row.newerOn', { name: row.ahead === 'source' ? sourceName : targetName })}
           </span>
         )}
       </div>
@@ -309,15 +310,15 @@ function DriftRowView({ row, sourceName, targetName, onDiff, onPromote }: {
       <div className="flex shrink-0 gap-2">
         {(row.status === 'drifted' || row.status === 'only-source') && (
           <>
-            <Button size="sm" variant="ghost" icon={<FileDiff className="size-4" />} onClick={onDiff} title="Diff nach Zuordnungen">Diff</Button>
+            <Button size="sm" variant="ghost" icon={<FileDiff className="size-4" />} onClick={onDiff} title={t('promote.row.diffTitle')}>{t('promote.row.diff')}</Button>
             <Button size="sm" variant="primary" icon={<Upload className="size-4" />} onClick={onPromote}>
-              {row.status === 'drifted' ? 'Übernehmen' : 'Anlegen'}
+              {t(row.status === 'drifted' ? 'promote.row.apply' : 'promote.row.create')}
             </Button>
           </>
         )}
         {row.status === 'only-target' && (
-          <Button size="sm" variant="ghost" icon={<ArrowLeftRight className="size-4" />} onClick={swap} title="Instanzen tauschen">
-            Andere Richtung
+          <Button size="sm" variant="ghost" icon={<ArrowLeftRight className="size-4" />} onClick={swap} title={t('promote.row.swapInstances')}>
+            {t('promote.row.otherDirection')}
           </Button>
         )}
       </div>
@@ -339,34 +340,33 @@ function ConfirmPromoteModal({ rows, sourceName, targetName, busy, error, onClos
     <Modal
       open
       onClose={onClose}
-      title={rows.length === 1 ? `„${rows[0]!.source?.name ?? rows[0]!.target?.name}“ übernehmen` : `${rows.length} Workflows übernehmen`}
+      title={t('promote.confirm.title', { count: rows.length, name: rows[0]!.source?.name ?? rows[0]!.target?.name ?? '' })}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
-          <Button variant="primary" loading={busy} onClick={onGo}>Nach {targetName} übernehmen</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="primary" loading={busy} onClick={onGo}>{t('promote.confirm.go', { target: targetName })}</Button>
         </>
       }
     >
       <div className="space-y-3">
         <div className="text-sm text-muted">
-          Von <b className="text-text">{sourceName}</b> nach <b className="text-text">{targetName}</b>: Vorhandene Workflows werden
-          überschrieben (der bisherige Stand bleibt in FlowVault gesichert), neue werden inaktiv angelegt.
+          {rich('promote.confirm.text', { b: (c) => <b className="text-text">{c}</b> }, { source: sourceName, target: targetName })}
         </div>
         {rows.length > 1 && (
           <div className="max-h-48 overflow-y-auto rounded-lg border border-line bg-sidebar px-3 py-2 text-[13px]">
             {rows.map((r) => (
               <div key={(r.source ?? r.target)!.workflowId} className="flex items-center justify-between gap-3 py-0.5">
                 <span className="truncate">{r.source!.name}</span>
-                <span className="shrink-0 text-xs text-dim">{r.target ? 'überschreiben' : 'neu anlegen'}</span>
+                <span className="shrink-0 text-xs text-dim">{t(r.target ? 'promote.confirm.overwrite' : 'promote.confirm.createNew')}</span>
               </div>
             ))}
           </div>
         )}
         {missing.length > 0 && (
           <div className="space-y-1 rounded-lg border border-mod/25 bg-mod/8 px-3 py-2 text-xs text-mod">
-            <div className="flex items-center gap-1.5 font-medium"><AlertTriangle className="size-3.5" />Ohne Zuordnung – wird unverändert übernommen:</div>
-            {missing.slice(0, 5).map((m) => <div key={m} className="truncate">{m}</div>)}
-            {missing.length > 5 && <div>… und {missing.length - 5} weitere</div>}
+            <div className="flex items-center gap-1.5 font-medium"><AlertTriangle className="size-3.5" />{t('promote.confirm.unmappedTitle')}</div>
+            {missing.slice(0, 5).map((m) => <div key={m} className="truncate">{message(m)}</div>)}
+            {missing.length > 5 && <div>{t('promote.confirm.more', { count: missing.length - 5 })}</div>}
           </div>
         )}
         {error && <ErrorBox>{error}</ErrorBox>}
@@ -386,8 +386,8 @@ function ResultsModal({ results, targetName, onClose, onDone }: {
     <Modal
       open
       onClose={onClose}
-      title={`${results.length - failed.length} übernommen`}
-      footer={<Button variant="primary" onClick={() => { onClose(); onDone(); }}>Fertig</Button>}
+      title={t('promote.results.title', { count: results.length - failed.length })}
+      footer={<Button variant="primary" onClick={() => { onClose(); onDone(); }}>{t('promote.results.done')}</Button>}
     >
       <div className="space-y-2">
         {results.map((r) => (
@@ -397,16 +397,16 @@ function ResultsModal({ results, targetName, onClose, onDone }: {
               <span className="text-sm font-medium">{r.name}</span>
               <Badge tone="neutral">v{r.version}</Badge>
               <Badge tone={r.error ? 'del' : r.action === 'created' ? 'add' : 'mod'}>
-                {r.error ? 'fehlgeschlagen' : r.action === 'created' ? `neu auf ${targetName}` : `aktualisiert`}
+                {r.error ? t('promote.results.failed') : r.action === 'created' ? t('promote.results.createdOn', { target: targetName }) : t('promote.results.updated')}
               </Badge>
-              {r.applied.length > 0 && <Badge tone="accent">{r.applied.length} Zuordnung{r.applied.length > 1 ? 'en' : ''} angewandt</Badge>}
+              {r.applied.length > 0 && <Badge tone="accent">{t('promote.results.applied', { count: r.applied.length })}</Badge>}
               {r.targetWorkflowId && !r.error && (
-                <Link to={`/workflows/${r.targetWorkflowId}`} className="text-xs text-accent-hi hover:underline">öffnen</Link>
+                <Link to={`/workflows/${r.targetWorkflowId}`} className="text-xs text-accent-hi hover:underline">{t('promote.results.open')}</Link>
               )}
             </div>
             {(r.error || r.missing.length > 0) && (
               <div className={cx('mt-1.5 text-xs', r.error ? 'text-del' : 'text-mod')}>
-                {r.error ?? r.missing.join(' · ')}
+                {r.error ?? r.missing.map(message).join(' · ')}
               </div>
             )}
           </div>
@@ -430,16 +430,16 @@ function DiffModal({ row, sourceId, targetId, onClose }: { row: DriftRow; source
   }, [row, sourceId, targetId]);
 
   return (
-    <Modal open onClose={onClose} title={`„${row.source!.name}“ – Diff nach Zuordnungen`} width="max-w-6xl">
+    <Modal open onClose={onClose} title={t('promote.diffModal.title', { name: row.source!.name })} width="max-w-6xl">
       {state.loading && <PageLoader />}
       {state.error && <ErrorBox>{state.error}</ErrorBox>}
       {state.data && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-del" />Ziel (jetzt)</span>
+            <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-del" />{t('promote.diffModal.targetNow')}</span>
             <ArrowRight className="size-3.5" />
-            <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-add" />Quelle v{state.data.version} (nach Zuordnungen)</span>
-            {state.data.applied.length > 0 && <Badge tone="accent">{state.data.applied.length} Zuordnung{state.data.applied.length > 1 ? 'en' : ''} angewandt</Badge>}
+            <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-add" />{t('promote.diffModal.sourceAfter', { number: state.data.version })}</span>
+            {state.data.applied.length > 0 && <Badge tone="accent">{t('promote.results.applied', { count: state.data.applied.length })}</Badge>}
           </div>
           <div className="max-h-[65vh] overflow-y-auto">
             <DiffView from={state.data.from} to={state.data.to} diff={state.data.diff} />
@@ -468,7 +468,7 @@ function MappingsTab({ data, setData }: { data: PromoteOverview; setData: (d: Pr
     try {
       const r = await api<{ suggestions: MappingSuggestion[] }>(`/promote/${data.source.id}/${data.target.id}/suggestions`);
       setSuggestions(r.suggestions);
-      if (!r.suggestions.length) toast('Keine Vorschläge – alle Referenzen sind zugeordnet oder identisch');
+      if (!r.suggestions.length) toast(t('promote.mappings.noSuggestions'));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -495,7 +495,7 @@ function MappingsTab({ data, setData }: { data: PromoteOverview; setData: (d: Pr
         { method: 'DELETE' },
       );
       setData(r);
-      toast(`Zuordnung für „${m.fromName ?? m.from}“ entfernt`);
+      toast(t('promote.mappings.removed', { name: m.fromName ?? m.from }));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -505,19 +505,18 @@ function MappingsTab({ data, setData }: { data: PromoteOverview; setData: (d: Pr
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="max-w-xl text-sm text-muted">
-          Gespeicherte Ersetzungen für {data.source.name} → {data.target.name}. Sie gelten für jede Übernahme und jedes Kopieren
-          auf diese Ziel-Instanz – auch nach Umbenennungen.
+          {t('promote.mappings.text', { source: data.source.name, target: data.target.name })}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" icon={<RefreshCw className={cx('size-4', busy && 'animate-spin')} />} onClick={() => void loadSuggestions()}>Vorschläge</Button>
-          <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setShowAdd(true)}>Manuell</Button>
+          <Button size="sm" icon={<RefreshCw className={cx('size-4', busy && 'animate-spin')} />} onClick={() => void loadSuggestions()}>{t('promote.mappings.suggestions')}</Button>
+          <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setShowAdd(true)}>{t('promote.mappings.manual')}</Button>
         </div>
       </div>
 
       {error && <ErrorBox>{error}</ErrorBox>}
       {suggestions && suggestions.length > 0 && (
         <Card className="mb-4 divide-y divide-line overflow-hidden">
-          <div className="bg-panel-3 px-4 py-2 text-[13px] text-muted">Vorschläge – automatisch erkannt anhand von Namen, Typ und gespeicherten Workflows</div>
+          <div className="bg-panel-3 px-4 py-2 text-[13px] text-muted">{t('promote.mappings.suggestionsHeader')}</div>
           {suggestions.map((s) => (
             <SuggestionRow key={`${s.kind}:${s.from}`} s={s} onSave={saveMapping} onSaved={() => setSuggestions((list) => (list ? list.filter((x) => !(x.kind === s.kind && x.from === s.from)) : list))} />
           ))}
@@ -526,9 +525,8 @@ function MappingsTab({ data, setData }: { data: PromoteOverview; setData: (d: Pr
 
       {data.mappings.length === 0 ? (
         <Card>
-          <EmptyState icon={<Layers className="size-6" />} title="Noch keine Zuordnungen">
-            Ohne Zuordnungen werden IDs unverändert übernommen – „Vorschläge“ erkennt passende Credentials, Sub-Workflows
-            und Data-Tables automatisch.
+          <EmptyState icon={<Layers className="size-6" />} title={t('promote.mappings.emptyTitle')}>
+            {t('promote.mappings.emptyText')}
           </EmptyState>
         </Card>
       ) : (
@@ -539,7 +537,7 @@ function MappingsTab({ data, setData }: { data: PromoteOverview; setData: (d: Pr
             return (
               <Card key={kind} className="divide-y divide-line overflow-hidden">
                 <div className="flex items-center justify-between bg-panel-3 px-4 py-2">
-                  <span className="text-[13px] font-medium">{MAPPING_KIND_LABEL[kind]}</span>
+                  <span className="text-[13px] font-medium">{mappingKindLabel(kind)}</span>
                   <Badge>{rows.length}</Badge>
                 </div>
                 {rows.map((m) => (
@@ -553,7 +551,7 @@ function MappingsTab({ data, setData }: { data: PromoteOverview; setData: (d: Pr
                       {m.kind === 'credential' ? m.toName ?? m.to : m.toName ?? m.to}
                       {m.toName && m.toName !== m.to && <span className="ml-2 font-mono text-xs text-dim">{m.to}</span>}
                     </span>
-                    <Button size="sm" variant="ghost" icon={<Trash2 className="size-4" />} title="Zuordnung entfernen" onClick={() => void remove(m)} />
+                    <Button size="sm" variant="ghost" icon={<Trash2 className="size-4" />} title={t('promote.mappings.removeTitle')} onClick={() => void remove(m)} />
                   </div>
                 ))}
               </Card>
@@ -591,16 +589,16 @@ function SuggestionRow({ s, onSave, onSaved }: {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-sm">
-          <Badge tone="neutral">{MAPPING_KIND_LABEL[s.kind]}</Badge>
+          <Badge tone="neutral">{mappingKindLabel(s.kind)}</Badge>
           <span className="truncate font-medium">{s.fromName ?? s.from}</span>
         </div>
         <div className="mt-0.5 text-xs text-dim">{s.reason}</div>
       </div>
       {isFree ? (
-        <input className={cx(inputCls, 'w-56')} placeholder="Pfad auf dem Ziel" value={text} onChange={(e) => setText(e.target.value)} />
+        <input className={cx(inputCls, 'w-56')} placeholder={t('promote.mappings.pathPlaceholder')} value={text} onChange={(e) => setText(e.target.value)} />
       ) : (
         <select className={cx(inputCls, 'w-56')} value={value} onChange={(e) => setValue(e.target.value)}>
-          <option value="">– wählen –</option>
+          <option value="">{t('promote.mappings.choose')}</option>
           {s.candidates.map((c) => (
             <option key={c.value} value={c.value}>{c.hint ? `${c.label} (${c.hint})` : c.label}</option>
           ))}
@@ -617,7 +615,7 @@ function SuggestionRow({ s, onSave, onSaved }: {
           setBusy(false);
         }}
       >
-        Übernehmen
+        {t('promote.row.apply')}
       </Button>
     </div>
   );
@@ -640,10 +638,10 @@ function AddMappingModal({ data, onClose, onSave }: {
     <Modal
       open
       onClose={onClose}
-      title="Zuordnung manuell anlegen"
+      title={t('promote.add.title')}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
+          <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           <Button
             variant="primary"
             loading={busy}
@@ -654,43 +652,43 @@ function AddMappingModal({ data, onClose, onSave }: {
               setBusy(false);
             }}
           >
-            Speichern
+            {t('common.save')}
           </Button>
         </>
       }
     >
       <div className="space-y-3">
-        <Field label="Art">
+        <Field label={t('promote.add.kind')}>
           <select className={inputCls} value={kind} onChange={(e) => setKind(e.target.value as MappingKind)}>
-            {(Object.keys(MAPPING_KIND_LABEL) as MappingKind[]).map((k) => (
-              <option key={k} value={k}>{MAPPING_KIND_LABEL[k]}</option>
+            {(['credential', 'workflow', 'webhookPath', 'dataTable'] as MappingKind[]).map((k) => (
+              <option key={k} value={k}>{mappingKindLabel(k)}</option>
             ))}
           </select>
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={`Quelle (${data.source.name})`} hint={kind === 'credential' ? 'Credential-ID auf der Quell-Instanz' : 'ID bzw. Bezeichner auf der Quell-Instanz'}>
+          <Field label={t('promote.add.source', { name: data.source.name })} hint={t(kind === 'credential' ? 'promote.add.credHintSource' : 'promote.add.hintSource')}>
             <input className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>
-          <Field label={`Ziel (${data.target.name})`} hint={kind === 'credential' ? 'Credential-ID auf der Ziel-Instanz' : 'ID bzw. Bezeichner auf der Ziel-Instanz'}>
+          <Field label={t('promote.add.target', { name: data.target.name })} hint={t(kind === 'credential' ? 'promote.add.credHintTarget' : 'promote.add.hintTarget')}>
             <input className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} />
           </Field>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Anzeigename Quelle (optional)">
+          <Field label={t('promote.add.fromName')}>
             <input className={inputCls} value={fromName} onChange={(e) => setFromName(e.target.value)} />
           </Field>
           {kind === 'credential' ? (
-            <Field label="Name auf dem Ziel" info="n8n speichert bei Credentials ID und Namen – ohne Namen kann der Ziel-Workflow das Credential nicht sauber auflösen.">
+            <Field label={t('promote.add.toNameCredential')} info={t('promote.add.toNameCredentialInfo')}>
               <input className={inputCls} value={toName} onChange={(e) => setToName(e.target.value)} />
             </Field>
           ) : (
-            <Field label="Anzeigename Ziel (optional)">
+            <Field label={t('promote.add.toName')}>
               <input className={inputCls} value={toName} onChange={(e) => setToName(e.target.value)} />
             </Field>
           )}
         </div>
         <div className="rounded-lg bg-panel-3 px-3 py-2 text-xs text-muted">
-          Am einfachsten über <b>„Vorschläge“</b>: dort stehen ID und Name der tatsächlich benutzten Referenzen.
+          {rich('promote.add.tip', { b: (c) => <b>{c}</b> })}
         </div>
       </div>
     </Modal>

@@ -12,6 +12,7 @@ import { decrypt, unpack } from '../crypto.ts';
 import { N8nClient } from '../n8n.ts';
 import type { InstanceRow, WorkflowRow } from '../sync.ts';
 import type { Snapshot } from '../../shared/diff.ts';
+import type { Translator } from '../../shared/i18n/index.ts';
 import { emptyMappingSet, type MappingKind, type MappingSet } from './transform.ts';
 
 export const MAPPING_KINDS: MappingKind[] = ['credential', 'workflow', 'webhookPath', 'dataTable'];
@@ -280,7 +281,8 @@ function clientFor(inst: InstanceRow) {
  * Vorschläge für Zuordnungen eines Paares. Automatisch (mit Ziel) nur, wo der
  * Name eindeutig passt; alles andere erscheint als Auswahl mit Kandidaten.
  */
-export async function suggestMappings(source: InstanceRow, target: InstanceRow): Promise<Suggestion[]> {
+/** `tr` bestimmt die Sprache der Begründungen (`reason`). */
+export async function suggestMappings(source: InstanceRow, target: InstanceRow, tr: Translator): Promise<Suggestion[]> {
   const sourceLatest = latestWorkflows(source.id);
   const targetLatest = latestWorkflows(target.id);
   const existing = new Set(listMappings(source.id, target.id).map((m) => `${m.kind}:${m.from}`));
@@ -307,17 +309,17 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow):
     const candidates = [...targetCreds.values()].sort((a, b) => a.name.localeCompare(b.name, 'de'));
     const ci = (s: string) => s.trim().toLowerCase();
     let match = candidates.find((c) => ci(c.name) === ci(ref.name));
-    let reason = 'Gleicher Name auf der Ziel-Instanz';
+    let reason = tr('suggestReason.sameName');
     if (!match) {
       const norm = normalizeEnvName(ref.name);
       match = candidates.find((c) => normalizeEnvName(c.name) === norm);
-      reason = 'Name ohne Umgebungszusatz („Staging“/„Prod“ …) passt';
+      reason = tr('suggestReason.nameWithoutEnv');
     }
     if (!match) {
       const sameType = candidates.filter((c) => c.type === ref.type);
       if (sameType.length === 1) {
         match = sameType[0];
-        reason = 'Einziger Credential dieses Typs auf der Ziel-Instanz';
+        reason = tr('suggestReason.onlyOfType');
       }
     }
     out.push({
@@ -327,7 +329,7 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow):
       to: match?.id ?? null,
       toName: match?.name ?? null,
       candidates: candidates.map((c) => ({ value: c.id, label: c.name, name: c.name, hint: c.type })),
-      reason: match ? reason : 'Kein eindeutiges Gegenstück – bitte zuordnen',
+      reason: match ? reason : tr('suggestReason.noCredentialMatch'),
     });
   }
 
@@ -352,7 +354,7 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow):
       to: match?.n8n_id ?? null,
       toName: match?.name ?? null,
       candidates: targetWorkflows.map((w) => ({ value: w.n8n_id, label: w.name, name: w.name })),
-      reason: match ? 'Gleicher Name auf der Ziel-Instanz' : 'Kein Workflow mit diesem Namen auf dem Ziel – bitte zuordnen',
+      reason: match ? tr('suggestReason.sameName') : tr('suggestReason.noWorkflowMatch'),
     });
   }
 
@@ -367,7 +369,7 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow):
       to: null,
       toName: null,
       candidates: targetPaths.map((p) => ({ value: p, label: p, name: p })),
-      reason: 'Pfad unterscheidet sich zwischen den Instanzen – Ziel-Pfad wählen',
+      reason: tr('suggestReason.pathDiffers'),
     });
   }
 
@@ -384,7 +386,7 @@ export async function suggestMappings(source: InstanceRow, target: InstanceRow):
       to: auto,
       toName: auto,
       candidates: targetTables.map((t) => ({ value: t, label: t, name: t })),
-      reason: auto ? 'Einzige Data-Table auf der Ziel-Instanz' : 'Bezeichner auf der Ziel-Instanz wählen',
+      reason: auto ? tr('suggestReason.onlyDataTable') : tr('suggestReason.chooseIdentifier'),
     });
   }
 

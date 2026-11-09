@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffe
 import { createPortal } from 'react-dom';
 import { CircleCheck, CircleHelp, CircleX, Loader2, X } from 'lucide-react';
 import { cx } from '../util.ts';
+import { t } from '../i18n.tsx';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -127,7 +128,7 @@ export function Modal({ open, onClose, title, children, footer, width = 'max-w-l
       <div className={cx('w-full animate-enter rounded-2xl border border-line-2 bg-panel shadow-[0_16px_48px_rgb(0_0_0/0.4)]', width)} onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <h2 className="text-base font-medium">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-dim transition-colors hover:bg-panel-3 hover:text-text" aria-label="Schließen">
+          <button onClick={onClose} className="rounded-md p-1 text-dim transition-colors hover:bg-panel-3 hover:text-text" aria-label={t('common.close')}>
             <X className="size-4" />
           </button>
         </div>
@@ -196,7 +197,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 export function StatusDot({ ok, syncing, className }: { ok: boolean | null; syncing?: boolean; className?: string }) {
   return (
     <span
-      title={syncing ? 'Sichert gerade' : ok === null ? 'Noch nicht gesichert' : ok ? 'Verbunden' : 'Fehler beim letzten Sync'}
+      title={syncing ? t('ui.syncing') : ok === null ? t('ui.neverSynced') : ok ? t('ui.connected') : t('ui.lastSyncFailed')}
       className={cx('inline-block size-1.5 shrink-0 rounded-full', syncing ? 'animate-pulse bg-info' : ok === null ? 'bg-dim' : ok ? 'bg-add' : 'bg-del', className)}
     />
   );
@@ -277,7 +278,7 @@ export function Switch({ checked, onChange, label, hint, info }: { checked: bool
  * (auch auf Touch-Geräten). Escape oder ein Klick daneben schließt. Wird in document.body gerendert,
  * damit es nicht in scrollenden Karten abgeschnitten wird.
  */
-export function InfoTip({ children, label = 'Erklärung', className }: { children: ReactNode; label?: string; className?: string }) {
+export function InfoTip({ children, label = t('ui.explanation'), className }: { children: ReactNode; label?: string; className?: string }) {
   const [hover, setHover] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -350,7 +351,7 @@ export function InfoTip({ children, label = 'Erklärung', className }: { childre
       <button
         ref={btn}
         type="button"
-        aria-label={`Erklärung: ${label}`}
+        aria-label={t('ui.explanationFor', { label })}
         aria-expanded={open}
         aria-describedby={open ? id : undefined}
         onMouseEnter={enter}

@@ -1,9 +1,6 @@
 import type { UpdateInfo } from '../shared/system.ts';
+import { fail } from '../shared/i18n/server.ts';
 import { buildInfo } from './version.ts';
-
-function fail(status: number, message: string): never {
-  throw Object.assign(new Error(message), { status });
-}
 
 function httpUrl(value: string | undefined): URL | null {
   if (!value) return null;
@@ -28,9 +25,9 @@ export function createUpdateService(env: NodeJS.ProcessEnv = process.env, reques
   let lastAttempt: number | null = null;
 
   function assertReady() {
-    if (!info.enabled) fail(503, 'Der Update-Auslöser ist nicht eingerichtet. Bitte die Deployment-Konfiguration prüfen.');
-    if (pending) fail(409, 'Eine Update-Anfrage wird bereits gesendet');
-    if (lastAttempt !== null && Date.now() - lastAttempt < 120_000) fail(429, 'Bitte zuerst den Deployment-Status prüfen und mindestens zwei Minuten warten');
+    if (!info.enabled) fail(503, 'errors.update.notConfigured');
+    if (pending) fail(409, 'errors.update.inProgress');
+    if (lastAttempt !== null && Date.now() - lastAttempt < 120_000) fail(429, 'errors.update.tooSoon');
   }
 
   return {
@@ -51,11 +48,11 @@ export function createUpdateService(env: NodeJS.ProcessEnv = process.env, reques
           });
         } catch {
           // A disconnect can occur after acceptance. Never expose transport errors or auto-retry.
-          fail(502, 'Keine Bestätigung vom Update-Dienst erhalten. Ob das Update gestartet wurde, ist unklar. Bitte dort den Status prüfen.');
+          fail(502, 'errors.update.noConfirmation');
         }
         // A trigger should acknowledge quickly. Never proxy remote output (which may contain credentials).
         void response.body?.cancel().catch(() => {});
-        if (!response.ok) fail(502, `Der Update-Dienst hat die Anfrage abgelehnt (HTTP ${response.status}). Bitte dort den Status prüfen.`);
+        if (!response.ok) fail(502, 'errors.update.rejected', { status: response.status });
         return { status: 'accepted' as const, requestedAt };
       } finally {
         pending = false;

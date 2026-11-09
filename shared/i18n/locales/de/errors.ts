@@ -1,0 +1,137 @@
+/** Fehlermeldungen von Server und Oberfläche sowie Meldungen, die der Server in Logs und Datenbank schreibt. */
+export const errors = {
+  http: {
+    generic: 'Fehler',
+    status: 'Fehler {status}',
+    internal: 'Interner Fehler',
+    unknownEndpoint: 'Unbekannter Endpunkt',
+    foreignOrigin: 'Anfrage von einer fremden Seite abgelehnt',
+    contentType: 'Content-Type muss application/json sein',
+    unauthenticated: 'Nicht angemeldet',
+    emailRequired: 'Bitte zuerst die Admin-E-Mail hinterlegen',
+    invalidId: 'Ungültige ID',
+    invalidNumber: 'Ungültiger Zahlenwert',
+    invalidStatus: 'Ungültiger Status',
+    internalToken: 'Ungültiges internes Token',
+    unknownInternalEndpoint: 'Unbekannter interner Endpunkt',
+    healthUnavailable: 'Die Auswertung der Ausführungen antwortet gerade nicht',
+  },
+  instance: {
+    notFound: 'Instanz nicht gefunden',
+    nameMissing: 'Name fehlt',
+    invalidUrl: 'Ungültige URL',
+    apiKeyMissing: 'API-Key fehlt',
+    keyRequired: 'Bei geänderter URL bitte den API-Key erneut eingeben',
+    unreadableKey: '(nicht entschlüsselbar)',
+  },
+  workflow: { notFound: 'Workflow nicht gefunden' },
+  version: { notFound: 'Version nicht gefunden' },
+  restore: {
+    modeInvalid: 'mode muss "overwrite" oder "copy" sein',
+    workflowGone: 'Der Workflow existiert in n8n nicht mehr – bitte „Als Kopie anlegen“ verwenden.',
+    targetNotFound: 'Ziel-Instanz nicht gefunden',
+  },
+  auth: {
+    invalidEmail: 'Bitte eine gültige E-Mail-Adresse eingeben',
+    invalidPassword: 'Passwort muss zwischen 8 und 1024 Zeichen haben',
+    throttled: 'Zu viele Versuche – bitte {seconds}s warten',
+    sessionExpired: 'Sitzung abgelaufen – bitte erneut anmelden',
+    reauthFailed: 'Passwort oder Sicherheitscode ist falsch bzw. bereits verwendet',
+    alreadySetUp: 'Bereits eingerichtet',
+    emailMustMatchEnv: 'E-Mail muss der konfigurierten ADMIN_EMAIL entsprechen',
+    wrongSetupCode: 'Einrichtungscode falsch – er steht im Server-Log',
+    wrongCredentials: 'E-Mail oder Passwort ist falsch',
+    loginExpired: 'Anmeldung abgelaufen – bitte erneut mit E-Mail und Passwort anmelden',
+    tooManyCodesLogin: 'Zu viele falsche Codes – bitte erneut mit E-Mail und Passwort anmelden',
+    wrongFactor: 'Sicherheitscode ist falsch oder bereits verwendet',
+    emailFromEnv: 'E-Mail wird über ADMIN_EMAIL gesetzt',
+    passwordFromEnv: 'Passwort wird über ADMIN_PASSWORD gesetzt',
+    twoFactorAlreadyOn: '2FA ist bereits aktiviert',
+    twoFactorNotOn: '2FA ist nicht aktiviert',
+    enrollExpired: 'Einrichtung abgelaufen – bitte erneut starten',
+    tooManyCodesEnroll: 'Zu viele falsche Codes – bitte die Einrichtung neu starten',
+    wrongAuthenticatorCode: 'Authenticator-Code ist falsch',
+  },
+  n8n: {
+    unreachable: 'Instanz nicht erreichbar ({reason})',
+    keyInvalid: 'API-Key ungültig oder abgelaufen (401)',
+    noPublicApi: 'Keine n8n Public API unter dieser URL gefunden (404)',
+    notJson: 'Antwort ist kein JSON – stimmt die URL?',
+  },
+  net: {
+    onlyHttp: 'Nur http(s)-Adressen sind erlaubt',
+    blocked: 'Diese Adresse ist nicht erlaubt (link-lokal bzw. Cloud-Metadaten)',
+    redirect: 'Die Adresse leitet weiter – bitte die Ziel-Adresse direkt eintragen. API-Keys werden aus Sicherheitsgründen nicht weitergeleitet.',
+    redirectTo: 'Die Adresse leitet auf {origin} weiter – bitte die Ziel-Adresse direkt eintragen. API-Keys werden aus Sicherheitsgründen nicht weitergeleitet.',
+  },
+  ai: {
+    keyMissing: 'Kein Melious-API-Key hinterlegt',
+    keyRequired: 'Bei geänderter API-Adresse bitte den API-Key erneut eingeben',
+    unreachable: 'Melious nicht erreichbar ({reason})',
+    keyInvalid: 'API-Key ungültig (401)',
+    notJson: 'Antwort ist kein JSON – stimmt die API-Adresse?',
+    emptyResponse: 'Leere Antwort vom Modell',
+  },
+  update: {
+    notConfigured: 'Der Update-Auslöser ist nicht eingerichtet. Bitte die Deployment-Konfiguration prüfen.',
+    inProgress: 'Eine Update-Anfrage wird bereits gesendet',
+    tooSoon: 'Bitte zuerst den Deployment-Status prüfen und mindestens zwei Minuten warten',
+    noConfirmation: 'Keine Bestätigung vom Update-Dienst erhalten. Ob das Update gestartet wurde, ist unklar. Bitte dort den Status prüfen.',
+    rejected: 'Der Update-Dienst hat die Anfrage abgelehnt (HTTP {status}). Bitte dort den Status prüfen.',
+  },
+  health: {
+    noToken: 'Kein INTERNAL_TOKEN gesetzt und keine internal.token-Datei vom Core gefunden',
+    coreUnreachable: 'Core nicht erreichbar ({url})',
+    coreStatus: 'Core antwortet mit HTTP {status}',
+  },
+  promote: {
+    sameInstance: 'Quelle und Ziel müssen unterschiedliche Instanzen sein',
+    notInSource: 'Workflow gehört nicht zur Quell-Instanz',
+    noVersion: 'Keine gesicherte Version',
+    noVersionForWorkflow: 'Keine gesicherte Version für diesen Workflow',
+    unknownKind: 'Unbekannter Zuordnungstyp',
+    emptyMapping: 'Quelle und Ziel dürfen nicht leer sein',
+    credentialNeedsName: 'Credentials brauchen den Namen auf der Ziel-Instanz (n8n speichert ID und Name)',
+    mappingAmbiguous: 'Zuordnung nicht eindeutig angegeben',
+    mappingNotFound: 'Zuordnung nicht gefunden',
+    noWorkflows: 'Keine Workflows angegeben',
+    tooMany: 'Höchstens 200 Workflows pro Übernahme',
+    suggestionsFailed: 'Vorschläge fehlgeschlagen: {reason}',
+  },
+};
+
+/** Meldungen in Logs und in der Datenbank. */
+export const log = {
+  listening: 'FlowVault läuft auf {url}',
+  setupCode: 'Einrichtungscode für das Admin-Konto: {code}',
+  proxyWarning:
+    '[auth] X-Forwarded-For erkannt, aber TRUST_PROXY ist nicht gesetzt: Alle Anmeldeversuche zählen für die IP des Proxys, ein Angreifer kann so alle aussperren. Hinter einem Reverse Proxy TRUST_PROXY=1 setzen.',
+  unknownLanguage: 'DEFAULT_LANGUAGE „{value}“ wird nicht unterstützt (verfügbar: {available}) – es gilt „{used}“.',
+  healthExternal: 'Health-Dienst: extern unter {url}',
+  healthExited: '[health] beendet ({reason}), Neustart in {seconds} s',
+  healthExitCode: 'Code {code}',
+  healthListening: 'FlowVault Health läuft auf {url}',
+  healthCannotListen: '[health] Kann nicht auf {address} lauschen: {reason}',
+  healthInstance: '[health] Instanz {id}: {reason}',
+  syncInstance: '[sync] Instanz {id}: {reason}',
+  aiVersion: '[ai] Version {id}: {reason}',
+};
+
+/** Texte, die der Server als „Commit-Nachricht“ einer Version speichert. */
+export const versionMessage = {
+  promoted: 'Übernommen aus „{name}“ v{version} ({instance})',
+  copied: 'Kopie von „{name}“ Version {version}',
+  aiFallbackTitle: 'Änderung',
+};
+
+/** Begründungen der Zuordnungs-Vorschläge (Umgebungen). */
+export const suggestReason = {
+  sameName: 'Gleicher Name auf der Ziel-Instanz',
+  nameWithoutEnv: 'Name ohne Umgebungszusatz („Staging“/„Prod“ …) passt',
+  onlyOfType: 'Einziger Credential dieses Typs auf der Ziel-Instanz',
+  noCredentialMatch: 'Kein eindeutiges Gegenstück – bitte zuordnen',
+  noWorkflowMatch: 'Kein Workflow mit diesem Namen auf dem Ziel – bitte zuordnen',
+  pathDiffers: 'Pfad unterscheidet sich zwischen den Instanzen – Ziel-Pfad wählen',
+  onlyDataTable: 'Einzige Data-Table auf der Ziel-Instanz',
+  chooseIdentifier: 'Bezeichner auf der Ziel-Instanz wählen',
+};

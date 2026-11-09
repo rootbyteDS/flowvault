@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ExecutionPage } from '../../shared/executions.ts';
 import type { TimelineVersion } from './analysis.ts';
+import { LocalizedError } from '../../shared/i18n/index.ts';
+import '../../shared/i18n/server.ts'; // setzt die Server-Sprache für Fehlermeldungen
 
 export const CORE_URL = (process.env.CORE_URL ?? `http://127.0.0.1:${process.env.CORE_PORT ?? 4000}`).replace(/\/+$/, '');
 
@@ -17,7 +19,7 @@ function token(): string {
   try {
     return fs.readFileSync(file, 'utf8').trim();
   } catch {
-    throw new CoreError('Kein INTERNAL_TOKEN gesetzt und keine internal.token-Datei vom Core gefunden', 0);
+    throw new CoreError({ key: 'errors.health.noToken' }, 0);
   }
 }
 
@@ -25,13 +27,8 @@ export function internalToken() {
   return token();
 }
 
-export class CoreError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
+/** Fehler im Gespräch mit dem Core. `message` kann ein gespeicherter `i18n:…`-Text des Cores sein – er wird unverändert durchgereicht. */
+export class CoreError extends LocalizedError {}
 
 async function get<T>(p: string): Promise<T> {
   let res: Response;
@@ -43,10 +40,10 @@ async function get<T>(p: string): Promise<T> {
     });
   } catch (e) {
     if (e instanceof CoreError) throw e;
-    throw new CoreError(`Core nicht erreichbar (${CORE_URL})`, 0);
+    throw new CoreError({ key: 'errors.health.coreUnreachable', params: { url: CORE_URL } }, 0);
   }
   const body = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new CoreError(body.error ?? `Core antwortet mit HTTP ${res.status}`, res.status);
+  if (!res.ok) throw new CoreError(body.error ?? { key: 'errors.health.coreStatus', params: { status: res.status } }, res.status);
   return body as T;
 }
 
