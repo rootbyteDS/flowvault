@@ -6,6 +6,8 @@ import { encrypt, decrypt } from './crypto.ts';
 import { N8nClient, normalizeBaseUrl } from './n8n.ts';
 import { announceSetupCode, requireAuth } from './auth.ts';
 import { createAuthRouter } from './auth-router.ts';
+import { buildInfo } from './version.ts';
+import { updates } from './updates.ts';
 import {
   clientFor, getInstance, isSyncing, loadSnapshot, recordWorkflow, restoreVersion, startScheduler, syncInstance, type InstanceRow,
 } from './sync.ts';
@@ -123,6 +125,7 @@ function clientIp(req: Request) {
 
 app.use('/api/auth', createAuthRouter(clientIp));
 app.use('/api', requireAuth);
+app.get('/api/system', (_req, res) => res.json({ ...buildInfo, updates: updates.info() }));
 
 // ───────────────────────── Instanzen ─────────────────────────
 

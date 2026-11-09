@@ -2,7 +2,7 @@
 
 Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workflows, legt bei jeder Änderung eine neue Version an und zeigt dir visuell, was sich geändert hat.
 
-**Stand: 0.1.0, frühe Entwicklung.** FlowVault wird selbst gehostet und verwendet ein einzelnes Admin-Konto mit E-Mail und Passwort sowie optionaler Zwei-Faktor-Authentifizierung (TOTP). Mehrere Benutzer und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
+**Stand: 0.2.0, frühe Entwicklung.** FlowVault wird selbst gehostet und verwendet ein einzelnes Admin-Konto mit E-Mail und Passwort sowie optionaler Zwei-Faktor-Authentifizierung (TOTP). Mehrere Benutzer und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
 
 [Schnellstart](#schnellstart-lokal) · [Docker](#betrieb-mit-docker) · [Entwicklung](#entwicklung) · [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md)
 
@@ -85,6 +85,44 @@ docker compose run --rm --no-deps --user root --entrypoint chown flowvault -R 10
 docker compose up -d
 ```
 
+## Version und Updates
+
+Die installierte Versionsnummer steht unten in der Seitenleiste. Ein Klick darauf öffnet **Einstellungen → Über FlowVault**. Dort siehst du zusätzlich den Git-Commit (falls bekannt) und im Docker-Image das Build-Datum. Lokale Änderungen werden gesondert markiert. Die Angaben kommen vom laufenden Server, nicht aus einer fest eingetragenen Versionsnummer im Frontend. Es gibt derzeit keine automatische Prüfung auf neuere Releases.
+
+### Manuell aktualisieren
+
+Bei Docker aus einem lokalen Checkout zuerst das [FlowVault-Backup](#backup-von-flowvault-selbst) sicherstellen, dann im Projektordner:
+
+```bash
+git pull --ff-only
+APP_REVISION="$(git rev-parse HEAD)" docker compose build --pull flowvault
+docker compose up -d flowvault
+```
+
+Der Build-Parameter `APP_REVISION` hinterlegt den gebauten Commit im Image. Ohne diesen Parameter zeigt ein Docker-Image die Versionsnummer und das Build-Datum; ein Git-Commit wird nicht geraten. Beim direkten Start aus einem Git-Checkout erkennt FlowVault den Commit beim Serverstart selbst. Anschließend die Seite neu laden.
+
+Für die vorhandene `docker-compose.arcane.yml` in **Arcane → Projekt → Build & Deploy** den neuen Stand bauen und deployen. Ein Neustart oder das reine Pullen eines Images übernimmt bei dieser `build:`-Konfiguration keinen neuen Quellcode. Ohne Docker: nach `git pull --ff-only` die Befehle `npm ci` und `npm run build` ausführen und den FlowVault-Prozess neu starten. Daten-Volume und `APP_SECRET` beibehalten.
+
+### Update aus der Oberfläche anfordern
+
+Der Button **Update anfordern** wird verfügbar, sobald ein externer Deployment-Webhook konfiguriert ist. FlowVault bestätigt vor jeder Anfrage das aktuelle Passwort und bei aktiver 2FA zusätzlich einen frischen App- oder Wiederherstellungscode. Der Deployment-Dienst übernimmt den eigentlichen Neubau und Austausch des Containers; FlowVault braucht dafür keinen Docker-Socket und keine Schreibrechte auf seinen Quellcode.
+
+In der `.env` des Compose-/Arcane-Projekts setzen und den Container einmal neu deployen:
+
+```dotenv
+UPDATE_WEBHOOK_URL=https://deployment.example.com/trigger
+# Nur falls der Deployment-Dienst einen Bearer-Token erwartet:
+UPDATE_WEBHOOK_TOKEN=
+# Optional: Link zum Projekt bzw. Deployment-Verlauf, wird im Browser angezeigt:
+UPDATE_MANAGEMENT_URL=https://deployment.example.com/projects/flowvault
+```
+
+Der Webhook erhält einen JSON-POST mit `app`, installierter `version`, bekanntem `revision` und `requestedAt` (Unix-Millisekunden). Er muss den Job zeitnah mit HTTP 2xx annehmen und im Hintergrund ausführen. Ein optionaler Token wird als `Authorization: Bearer …` gesendet. Ziel und Token stammen ausschließlich aus der Serverkonfiguration und werden nicht an den Browser ausgegeben. Weiterleitungen werden nicht verfolgt. Bei Timeout nach zehn Sekunden oder Verbindungsabbruch wird der Ausgang als unklar angezeigt; es gibt keine automatischen Wiederholungen. Gleichzeitige Anfragen sind gesperrt, zwischen Versuchen liegen mindestens zwei Minuten. Der Deployment-Dienst sollte ebenfalls parallele Jobs verhindern.
+
+**Arcane:** Nach dessen [Webhook-Dokumentation](https://getarcane.app/docs/reference/api) werden Webhooks unter **Settings → Webhooks** angelegt. Wähle nur das betroffene Projekt als Ziel. Ein Project-Redeploy-Webhook kann bereitgestellte Images aktualisieren; für unseren aktuellen Quellcode-Build reicht das allein nicht: Der angebundene Job muss **Build & Deploy** ausführen. Dafür beispielsweise einen eigenen Deployment-Job über einen Webhook ansteuern. Solange der nicht eingerichtet ist, direkt in Arcane bauen und deployen. `UPDATE_MANAGEMENT_URL` kann auf das Arcane-Projekt zeigen.
+
+Eine angenommene Anfrage bedeutet **nicht**, dass das Update erfolgreich installiert wurde. Den Verlauf beim Deployment-Dienst prüfen und nach Abschluss FlowVault neu laden; die angezeigte Version und Build-Informationen zeigen dann den laufenden Stand.
+
 ## Konfiguration
 
 | Variable         | Standard     | Beschreibung |
@@ -96,6 +134,10 @@ docker compose up -d
 | `ADMIN_PASSWORD` | –            | Festes Admin-Passwort statt Einrichtung im Browser |
 | `ADMIN_EMAIL`    | –            | Feste Admin-E-Mail; zusammen mit `ADMIN_PASSWORD` ohne Ersteinrichtung nutzbar. Ohne diese Variable wird die E-Mail im Browser hinterlegt |
 | `TRUST_PROXY`    | –            | `1` hinter einem Reverse Proxy (Pflicht, sonst greift die Login-Sperre für alle) |
+| `APP_REVISION`   | –            | Optionaler Docker-Build-Parameter für den gebauten Git-Commit |
+| `UPDATE_WEBHOOK_URL` | –        | Externer Deployment-Webhook (POST); ohne diesen ist der UI-Update-Button nicht aktiv |
+| `UPDATE_WEBHOOK_TOKEN` | –      | Optionaler Bearer-Token für den Deployment-Webhook, nur serverseitig verwendet |
+| `UPDATE_MANAGEMENT_URL` | –     | Optionaler öffentlicher Link zum Deployment-Verlauf bzw. Arcane-Projekt |
 | `HEALTH_PORT`    | `4100`       | Interner Port des Health-Dienstes (nur `127.0.0.1`, nie nach außen) |
 
 Docker Compose liest `.env` für die in `docker-compose.yml` referenzierten Variablen. Weitere Einstellungen müssen dort unter `environment` ergänzt werden. Beim direkten Start über npm wird `.env` nicht automatisch geladen: Variablen in der Shell setzen, z. B. `PORT=4001 HEALTH_PORT=4101 npm start` (macOS/Linux).
@@ -156,7 +198,9 @@ Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flo
 ```
 server/          Node.js + Express (TypeScript, läuft nativ ohne Build)
   index.ts       REST-API & Auslieferung des Frontends
-  auth-router.ts Admin-Konto, E-Mail-Migration und 2FA-Endpunkte
+  auth-router.ts Admin-Konto, E-Mail-Migration, 2FA und bestätigter Update-Auslöser
+  version.ts     Versions- und Buildinformationen des laufenden Servers
+  updates.ts     Optionaler externer Deployment-Webhook
   auth.ts        Passwortprüfung, Sitzungen und Login-Sperre
   two-factor.ts  TOTP-Prüfung, Replay-Schutz und Wiederherstellungscodes
   sync.ts        Sync-Engine, Scheduler, Wiederherstellen

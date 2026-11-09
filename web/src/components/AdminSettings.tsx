@@ -3,7 +3,7 @@ import type { AuthStatus, TwoFactorEnrollment } from '../../../shared/auth.ts';
 import { api, useApi } from '../api.ts';
 import { Button, Card, ErrorBox, Field, inputCls, Status, useToast } from './ui.tsx';
 
-function ProofFields({ password, setPassword, factor, setFactor, twoFactor }: {
+export function ProofFields({ password, setPassword, factor, setFactor, twoFactor }: {
   password: string; setPassword: (v: string) => void; factor: string; setFactor: (v: string) => void; twoFactor?: boolean;
 }) {
   return (

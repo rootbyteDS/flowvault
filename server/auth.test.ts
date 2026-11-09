@@ -19,13 +19,21 @@ const { announceSetupCode, requireAuth, setPassword } = await import('./auth.ts'
 const { createAuthRouter } = await import('./auth-router.ts');
 const { decrypt, sha256 } = await import('./crypto.ts');
 const { totp, totpCounter } = await import('./two-factor.ts');
+const { createUpdateService } = await import('./updates.ts');
+let updateCalls = 0;
+let updateBody = '';
+const updateService = createUpdateService({ UPDATE_WEBHOOK_URL: 'https://deploy.example.test/trigger' }, async (_input, init) => {
+  updateCalls++;
+  updateBody = String(init?.body);
+  return new Response(null, { status: 202 });
+});
 const password = 'test-admin-password';
 const email = 'admin@example.com';
 const now = 1_750_000_005_000;
 
 const app = express();
 app.use(express.json());
-app.use('/api/auth', createAuthRouter((req) => String(req.headers['x-test-ip'])));
+app.use('/api/auth', createAuthRouter((req) => String(req.headers['x-test-ip']), updateService));
 app.get('/api/protected', requireAuth, (_req, res) => res.json({ ok: true }));
 app.use((err: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   res.status(err.status ?? 500).json({ error: err.message });
@@ -308,6 +316,28 @@ test('recovery codes still allow login and resetting 2FA if the encryption key i
   assert.equal((await browser.request('/auth/login/verify', { factor: codes[0] })).status, 200);
   assert.equal((await browser.request('/auth/2fa/disable', { current: password, factor: codes[1] })).status, 200);
   assert.equal((await browser.request('/auth/status')).body.twoFactor, false);
+});
+
+test('deployment triggers require a full admin session, password and a fresh second factor', async () => {
+  const { browser, secret, codes } = await enabled();
+  const anonymous = new Browser();
+  assert.equal((await anonymous.request('/auth/update', { current: password, factor: codes[0] })).status, 401);
+  await anonymous.login();
+  assert.equal((await anonymous.request('/auth/update', { current: password, factor: codes[0] })).status, 401);
+  assert.equal((await browser.request('/auth/update', { current: 'wrong', factor: codes[0] })).status, 401);
+  assert.equal((await browser.request('/auth/update', { current: password })).status, 401);
+  assert.equal((await browser.request('/auth/update', { current: password, factor: totp(secret).generate({ timestamp: now - 30_000 }) })).status, 401);
+  assert.equal(updateCalls, 0);
+  const response = await browser.request('/auth/update', { current: password, factor: codes[0], url: 'https://attacker.example.test' });
+  assert.equal(response.status, 202);
+  assert.equal(response.body.status, 'accepted');
+  assert.equal(updateCalls, 1);
+  assert.equal(updateBody.includes(password), false);
+  assert.equal(updateBody.includes(codes[0]!), false);
+  assert.equal(updateBody.includes('attacker'), false);
+  assert.equal((await browser.request('/auth/status')).body.recoveryCodesRemaining, 9);
+  assert.equal((await browser.request('/auth/update', { current: password, factor: codes[1] })).status, 429);
+  assert.equal(updateCalls, 1);
 });
 
 test('TOTP accepts limited clock drift, rejects replay/old codes, and matches an RFC 6238 vector', () => {

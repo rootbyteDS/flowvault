@@ -6,6 +6,8 @@ services:
     build:
       context: https://github.com/rootbyteDS/flowvault.git#main
       dockerfile: Dockerfile
+      args:
+        APP_REVISION: ${APP_REVISION:-}
     container_name: flowvault
     restart: unless-stopped
     ports:
@@ -15,6 +17,12 @@ services:
       APP_SECRET: ${APP_SECRET:?Bitte APP_SECRET in Arcane setzen}
       # Optional: festes Passwort. Leer = Einrichtungscode aus den Container-Logs.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      # Optional: Webhook muss bei diesem Quellcode-Build neu bauen UND deployen.
+      # Ein reiner Redeploy-/Container-Update-Webhook baut keinen neuen Quellcode.
+      UPDATE_WEBHOOK_URL: ${UPDATE_WEBHOOK_URL:-}
+      UPDATE_WEBHOOK_TOKEN: ${UPDATE_WEBHOOK_TOKEN:-}
+      UPDATE_MANAGEMENT_URL: ${UPDATE_MANAGEMENT_URL:-}
       # Bei Betrieb hinter einem Reverse Proxy in Arcane TRUST_PROXY=1 setzen.
       TRUST_PROXY: ${TRUST_PROXY:-0}
     volumes:

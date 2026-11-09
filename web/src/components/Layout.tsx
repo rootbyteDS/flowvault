@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { Activity, ArrowRightLeft, LayoutDashboard, LogOut, Menu, Server, Settings, Workflow, X } from 'lucide-react';
 import { api, useApi, type Instance } from '../api.ts';
+import type { SystemInfo } from '../../../shared/system.ts';
 import { StatusDot } from './ui.tsx';
 import { cx } from '../util.ts';
 
@@ -33,7 +34,8 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   const { data: instances } = useApi<Instance[]>('/instances', { poll: (d) => (d.some((i) => i.syncing) ? 2000 : 30000) });
-  useEffect(() => setOpen(false), [loc.pathname]);
+  const system = useApi<SystemInfo>('/system');
+  useEffect(() => setOpen(false), [loc.pathname, loc.hash]);
 
   const sidebar = (
     <div className="flex h-full flex-col">
@@ -64,6 +66,10 @@ export function Layout({ onLogout }: { onLogout: () => void }) {
       </div>
 
       <div className="border-t border-line p-3">
+        <Link to="/settings#system" className="mb-2 flex items-center justify-between gap-2 px-2.5 py-1 text-xs text-dim hover:text-muted" title="Versionsinformationen und Updates anzeigen">
+          <span>FlowVault {system.data ? `v${system.data.version}` : system.error ? 'Version unbekannt' : 'Version …'}</span>
+          {system.data?.revision && <span className="font-mono">{system.data.revision.slice(0, 8)}{system.data.modified ? '*' : ''}</span>}
+        </Link>
         <button
           onClick={async () => {
             await api('/auth/logout', { method: 'POST' });

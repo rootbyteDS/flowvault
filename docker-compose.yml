@@ -1,6 +1,9 @@
 services:
   flowvault:
-    build: .
+    build:
+      context: .
+      args:
+        APP_REVISION: ${APP_REVISION:-}
     container_name: flowvault
     restart: unless-stopped
     ports:
@@ -14,6 +17,10 @@ services:
       # Einrichtungscode aus `docker logs flowvault`.
       # ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       # ADMIN_EMAIL: ${ADMIN_EMAIL}
+      # Optional: externer Deployment-Dienst für den Update-Button in FlowVault.
+      UPDATE_WEBHOOK_URL: ${UPDATE_WEBHOOK_URL:-}
+      UPDATE_WEBHOOK_TOKEN: ${UPDATE_WEBHOOK_TOKEN:-}
+      UPDATE_MANAGEMENT_URL: ${UPDATE_MANAGEMENT_URL:-}
       # Hinter einem Reverse Proxy (Caddy, Traefik, nginx) unbedingt setzen – sonst teilen sich
       # alle Nutzer die IP des Proxys und die Login-Sperre trifft alle gleichzeitig:
       # TRUST_PROXY: "1"

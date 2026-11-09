@@ -11,6 +11,8 @@ import {
   consumeSecondFactor, newRecoveryCodes, newTotpSecret, recoveryHashes, totp, totpCounter, twoFactorEnabled,
 } from './two-factor.ts';
 
+import { updates, type createUpdateService } from './updates.ts';
+
 const LOGIN_COOKIE = 'fv_login';
 const LOGIN_TTL = 5 * 60_000;
 const ENROLL_TTL = 10 * 60_000;
@@ -45,7 +47,7 @@ function rotateSession(req: Request, res: Response) {
 }
 
 /** Separate router so the full authentication boundary can be tested without n8n/services. */
-export function createAuthRouter(clientIp: (req: Request) => string) {
+export function createAuthRouter(clientIp: (req: Request) => string, updateService: ReturnType<typeof createUpdateService> = updates) {
   const router = Router();
   const ip = (req: Request) => `auth:${clientIp(req)}`;
   function throttle(req: Request, _res: Response, next: NextFunction) {
@@ -162,6 +164,16 @@ export function createAuthRouter(clientIp: (req: Request) => string) {
   });
 
   router.use(requireAuth);
+
+  router.post('/update', throttle, async (req, res) => {
+    updateService.assertReady();
+    const proof = await reauthenticate(req);
+    assertFresh(req, proof);
+    // The deployment may replace this process. Acknowledgement is not installation success.
+    const result = await updateService.trigger();
+    loginSucceeded(ip(req));
+    res.status(202).json(result);
+  });
 
   router.post('/password', throttle, async (req, res) => {
     if (process.env.ADMIN_PASSWORD) fail(400, 'Passwort wird über ADMIN_PASSWORD gesetzt');

@@ -4,6 +4,7 @@ import { CircleCheck, CircleX } from 'lucide-react';
 import { api, useApi, type AiSettings, type HealthSettings, type HealthStatus } from '../api.ts';
 import { Button, Card, ErrorBox, Field, InfoTip, PageHeader, Status, Switch, inputCls, useToast } from '../components/ui.tsx';
 import { AdminSettings } from '../components/AdminSettings.tsx';
+import { SystemSettings } from '../components/SystemSettings.tsx';
 import { HowItWorks, explainPollError } from '../components/health.tsx';
 import { cx, timeAgo } from '../util.ts';
 
@@ -345,6 +346,7 @@ export function SettingsPage() {
     <>
       <PageHeader title="Einstellungen" />
       <div className="grid max-w-5xl gap-6 md:grid-cols-2">
+        <SystemSettings />
         <HealthCard />
         <AiCard />
         <AdminSettings />
