@@ -1,8 +1,8 @@
 # Sicherheitsprobleme melden
 
-Bitte veröffentliche vermutete Sicherheitslücken nicht als öffentliches Issue oder in einem Pull Request.
+Bitte veröffentliche vermutete Sicherheitslücken nicht als öffentliches Issue, in einer Diskussion oder in einem Pull Request.
 
-Wenn dieses GitHub-Repository unter **Security → Advisories → Report a vulnerability** einen vertraulichen Meldeweg anbietet, nutze diesen. Falls die Option fehlt, kontaktiere die Repository-Verantwortlichen über einen privaten Kontaktweg, den sie in ihrem GitHub-Profil angegeben haben, und frage zunächst nach einem sicheren Kanal für die Details. Dieses Projekt hat bislang keine eigene Sicherheitsadresse festgelegt.
+Melde sie vertraulich über GitHub: im Repository unter **Security → Report a vulnerability** oder direkt über [dieses Formular](https://github.com/rootbyteDS/flowvault/security/advisories/new). Die Meldung sehen nur du und die Repository-Verantwortlichen. Dafür brauchst du ein GitHub-Konto.
 
 Eine Meldung sollte enthalten:
 
@@ -13,6 +13,6 @@ Eine Meldung sollte enthalten:
 
 Keine echten API-Keys, Passwörter, Datenbankkopien oder Kundendaten mitsenden.
 
-## Projektstand
+## Unterstützte Versionen
 
-FlowVault befindet sich in früher Entwicklung (0.1.x). Es gibt bislang keine zugesagten Support-Zeiträume oder Reaktionszeiten. Hinweise zur Absicherung einer Installation stehen in der [README](README.md#sicherheit).
+FlowVault befindet sich in früher Entwicklung (0.x). Korrekturen erfolgen auf dem aktuellen Stand von `main`; ältere Versionen erhalten keine eigenen Sicherheitsupdates. Es gibt bislang keine zugesagten Support-Zeiträume oder Reaktionszeiten. Hinweise zur Absicherung einer Installation stehen in der [README](README.md#sicherheit).

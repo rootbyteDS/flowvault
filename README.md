@@ -2,9 +2,11 @@
 
 Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workflows, legt bei jeder Änderung eine neue Version an und zeigt dir visuell, was sich geändert hat.
 
-**Stand: 0.2.0, frühe Entwicklung.** FlowVault wird selbst gehostet und verwendet ein einzelnes Admin-Konto mit E-Mail und Passwort sowie optionaler Zwei-Faktor-Authentifizierung (TOTP). Mehrere Benutzer und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
+![FlowVault zeigt beim Workflow „Daily KPI Report“ die Versionshistorie und warnt, dass seit v2 45 % der Läufe fehlschlagen, mit Vorschlag zum Zurücksetzen auf v1](docs/images/workflow-health-de.png)
 
-[Schnellstart](#schnellstart-lokal) · [Docker](#betrieb-mit-docker) · [Entwicklung](#entwicklung) · [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md) · [English](README.en.md)
+**Status: frühe Entwicklung (0.x).** FlowVault wird selbst gehostet und verwendet ein einzelnes Admin-Konto mit E-Mail und Passwort sowie optionaler Zwei-Faktor-Authentifizierung (TOTP). Mehrere Benutzer und Rollen sind nicht implementiert. Das Projekt ist unabhängig von n8n und GitHub.
+
+[Schnellstart](#schnellstart-lokal) · [Docker](#betrieb-mit-docker) · [Konfiguration](#konfiguration) · [Sicherheit](#sicherheit) · [Entwicklung](#entwicklung) · [Beiträge](CONTRIBUTING.md) · [Sicherheitsmeldungen](SECURITY.md) · [English](README.en.md)
 
 ## Features
 
@@ -19,20 +21,25 @@ Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workfl
 - **Archivierte Workflows** werden standardmäßig übersprungen. Pro Instanz einschaltbar unter *Instanz bearbeiten → Archivierte Workflows sichern*. Schon gesicherte Historie bleibt erhalten (Workflows → „Archiviert“).
 - **Welche Änderung hat es kaputt gemacht?** FlowVault holt die Ausführungen aus n8n und legt sie über die Versionshistorie: Fehlerquote pro Version („seit v14 schlagen 38 % fehl, vorher 0 %“), im Diff-Canvas rot markiert, welcher Node seit der Änderung scheitert, und bei einem Anstieg eine Warnung mit Rollback-Vorschlag. Rollback per Klick. Läuft als eigener Prozess innerhalb von FlowVault, siehe [Health-Dienst](#health-dienst-fehlerquote-pro-version)
 - **Download** jeder Version als n8n-importierbares JSON
-- **Deutsch und Englisch**: Oberfläche, Fehlermeldungen und KI-Texte; weitere Sprachen lassen sich ohne Codeänderung ergänzen (siehe [Sprachen](#sprachen))
+- **Anpassbares Dashboard**: Kennzahlen, Änderungsverlauf, letzte Änderungen, Instanzübersicht und Health-Warnungen einzeln ein- und ausblenden ([Details](docs/DASHBOARD.md))
 - Aktivitäts-Feed und Heatmap, Sync-Protokoll pro Instanz
+- **Deutsch und Englisch**: Oberfläche, Fehlermeldungen und KI-Texte; weitere Sprachen lassen sich ohne Codeänderung ergänzen (siehe [Sprachen](#sprachen))
 - API-Keys AES-256-GCM-verschlüsselt, Login mit E-Mail und Passwort, optionale 2FA per Authenticator-App mit einmaligen Wiederherstellungscodes (siehe [Sicherheit](#sicherheit))
-- **KI-Änderungstexte (optional)** über [Melious](https://melious.ai): Zu jeder neuen Version schreibt ein Modell auf EU-Infrastruktur einen Titel im Commit-Stil plus Stichpunkte. Gesendet werden nur die geänderten Nodes und Parameter – nur wenn du für eine erste Version selbst einen Text anforderst, der ganze Workflow. Vorher entfernt FlowVault Werte von Feldern, Headern und Parametern wie `password`, `token`, `apiKey`, `key`, `Authorization` oder `X-…-Auth`, typische Key-Formate (Bearer, JWT, `sk_…`, `ghp_…`, AWS, Telegram), Zugangsdaten in URLs (`benutzer:passwort@host`), Webhook-Adressen von Slack und Discord sowie lange, zufällig wirkende Zeichenfolgen (z. B. Hex- oder Base64-Schlüssel als Konstante im Code). Das ist eine Heuristik: Zugangsdaten gehören in n8n-Credentials, nicht in Code-Nodes. Einrichtung unter **Einstellungen → KI-Änderungstexte**.
+- **KI-Änderungstexte (optional)** über [Melious](https://melious.ai): Ein Modell auf EU-Infrastruktur schreibt zu jeder neuen Version einen Titel im Commit-Stil plus Stichpunkte. Zugangsdaten werden vorher herausgefiltert (siehe [KI-Änderungstexte](#ki-änderungstexte-optional))
 
 Nur echte Änderungen erzeugen Versionen – Laufzeitdaten wie `staticData` (z. B. Polling-Zeitstempel) werden ignoriert.
 
+![Visueller Diff zwischen v1 und v2: neue Node grün, geänderte Nodes gelb, die seit der Änderung scheiternde Node „Fetch Stripe“ rot umrandet](docs/images/diff-canvas-de.png)
+
+*Screenshots mit Demo-Daten aus dem mitgelieferten Mock (`npm run mock-n8n`).*
+
 ## Schnellstart (lokal)
 
-Voraussetzung: **Node.js ≥ 22.18** (empfohlen 24). Keine Datenbank nötig – SQLite ist eingebaut.
-
-Klone dieses Repository zunächst mit der URL aus **Code → SSH/HTTPS** auf GitHub und wechsle in den Projektordner. Führe dort aus:
+Voraussetzung: **Node.js ≥ 22.18** (empfohlen 24) und Git. Keine Datenbank nötig – SQLite ist eingebaut.
 
 ```bash
+git clone https://github.com/rootbyteDS/flowvault.git
+cd flowvault
 npm ci
 npm run build
 npm start            # → http://127.0.0.1:4000
@@ -40,30 +47,15 @@ npm start            # → http://127.0.0.1:4000
 
 Beim ersten Aufruf legst du die E-Mail und das Passwort für dein Admin-Konto fest und verbindest dann deine erste Instanz. Dafür brauchst du den **Einrichtungscode**, den der Server beim Start ins Terminal schreibt – so kann niemand anderes eine frisch gestartete Instanz übernehmen. Anschließend kannst du unter **Einstellungen → Zwei-Faktor-Authentifizierung** 2FA aktivieren.
 
-Bei bestehenden Installationen meldest du dich zunächst mit dem bisherigen Admin-Passwort an und hinterlegst anschließend einmalig die Admin-E-Mail. Bis dahin sind die übrigen Funktionen gesperrt. Das bisherige Passwort bleibt erhalten; die Umstellung meldet andere Geräte ab.
+Für den Betrieb auf einem Server siehe [Betrieb mit Docker](#betrieb-mit-docker).
 
 ### n8n-API-Key besorgen
 
 In n8n: **Settings → n8n API → Create an API key**. Der Key braucht Lesezugriff auf Workflows (für das Wiederherstellen und Übernehmen auch Schreibzugriff). Für die Fehlerquoten werden zusätzlich Leserechte auf Ausführungen benötigt. Ob die Public API und einzelne Berechtigungen verfügbar sind, hängt von deiner n8n-Installation ab.
 
-## Entwicklung
-
-Nach `npm ci` startest du die Entwicklung mit `npm run dev`. Den Mock und die folgenden Testbefehle führst du jeweils in einem weiteren Terminal aus. In FlowVault verbindest du den Mock über `http://localhost:5679` mit dem API-Key `test-key`; eine echte n8n-Instanz ist dafür nicht nötig.
-
-```bash
-npm run dev          # API (Port 4000, startet den Health-Dienst mit) + Vite-Frontend (http://localhost:5173)
-npm run mock-n8n     # Fake-n8n auf Port 5679, API-Key: test-key, erzeugt laufend Ausführungen
-MOCK_ENV=Prod MOCK_PORT=5680 npm run mock-n8n   # zweite Fake-Instanz mit eigenen IDs – für Umgebungen (Staging → Prod)
-curl -X POST localhost:5679/_mock/mutate   # simuliert eine Workflow-Änderung
-curl -X POST localhost:5679/_mock/break    # Änderung, nach der ein Node in 40 % der Läufe scheitert
-curl -X POST 'localhost:5679/_mock/run?n=30'  # sofort 30 Läufe pro aktivem Workflow
-npm test             # Auth-/2FA-Tests, Umgebungs-Zuordnungen, Health-Auswertung und Übersetzungen
-# Der Mock spielt auch Melious: API-Adresse http://localhost:5679/v1, Key test-ai-key
-MOCK_LOG_PROMPT=1 npm run mock-n8n          # zeigt, was an die KI gesendet würde
-npm run typecheck
-```
-
 ## Betrieb mit Docker
+
+Im geklonten Projektordner (siehe [Schnellstart](#schnellstart-lokal)):
 
 ```bash
 cp .env.example .env
@@ -77,7 +69,11 @@ docker compose up -d --build
 docker compose logs flowvault  # zeigt den Einrichtungscode für das Admin-Konto
 ```
 
-Der Port ist nur auf `127.0.0.1` freigegeben. Von außen erreichbar machst du FlowVault über einen Reverse Proxy mit HTTPS (Caddy, Traefik, nginx) – dann **`TRUST_PROXY=1` setzen**, sonst zählen alle Login-Versuche für die IP des Proxys. Läuft FlowVault im selben Docker-Netzwerk wie n8n, kannst du als URL z. B. `http://n8n:5678` eintragen.
+Docker Compose übergibt aus der `.env` diese Variablen an den Container: `APP_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `TRUST_PROXY`, `DEFAULT_LANGUAGE` und die `UPDATE_…`-Variablen (siehe [Konfiguration](#konfiguration)). Port, Bind-Adresse und Datenverzeichnis sind im Container fest eingestellt. Nach einer Änderung an der `.env` übernimmt `docker compose up -d` die neuen Werte.
+
+Der Port ist nur auf `127.0.0.1` freigegeben. Von außen erreichbar machst du FlowVault über einen Reverse Proxy mit HTTPS (Caddy, Traefik, nginx) – dann in der `.env` **`TRUST_PROXY=1` setzen**, sonst zählen alle Login-Versuche für die IP des Proxys. Läuft FlowVault im selben Docker-Netzwerk wie n8n, kannst du als URL z. B. `http://n8n:5678` eintragen.
+
+Für [Arcane](https://getarcane.app) liegt `docker-compose.arcane.yml` bei. Sie baut direkt aus diesem GitHub-Repository; `APP_SECRET` und die übrigen Variablen setzt du in Arcanes `.env`-Editor.
 
 Der Container läuft als Benutzer `node` (UID 1000). Ein Volume aus einer älteren Version (lief als root) einmalig übergeben. Über Compose wird dabei das tatsächlich verwendete Volume angesprochen, auch wenn sein Name einen Projekt-Präfix enthält:
 
@@ -86,6 +82,36 @@ docker compose stop flowvault
 docker compose run --rm --no-deps --user root --entrypoint chown flowvault -R 1000:1000 /data
 docker compose up -d
 ```
+
+## Konfiguration
+
+| Variable         | Standard     | Beschreibung |
+|------------------|--------------|--------------|
+| `PORT`           | `4000`       | HTTP-Port |
+| `HOST`           | `127.0.0.1`  | Bind-Adresse (`0.0.0.0` im Container) |
+| `DATA_DIR`       | `./data`     | Speicherort für Datenbank & Schlüssel |
+| `APP_SECRET`     | –            | Schlüssel für die API-Key-Verschlüsselung. Ohne: wird automatisch in `data/secret.key` erzeugt |
+| `ADMIN_PASSWORD` | –            | Festes Admin-Passwort statt Einrichtung im Browser |
+| `ADMIN_EMAIL`    | –            | Feste Admin-E-Mail; zusammen mit `ADMIN_PASSWORD` ohne Ersteinrichtung nutzbar. Ohne diese Variable wird die E-Mail im Browser hinterlegt |
+| `DEFAULT_LANGUAGE` | `de`       | `de` oder `en`: Sprache der Server-Logs und der KI-Änderungstexte sowie Ausweichsprache der Oberfläche (siehe [Sprachen](#sprachen)) |
+| `TRUST_PROXY`    | –            | `1` hinter einem Reverse Proxy (Pflicht, sonst greift die Login-Sperre für alle) |
+| `APP_REVISION`   | –            | Optionaler Docker-Build-Parameter für den gebauten Git-Commit |
+| `UPDATE_WEBHOOK_URL` | –        | Externer Deployment-Webhook (POST); ohne diesen ist der UI-Update-Button nicht aktiv |
+| `UPDATE_WEBHOOK_TOKEN` | –      | Optionaler Bearer-Token für den Deployment-Webhook, nur serverseitig verwendet |
+| `UPDATE_MANAGEMENT_URL` | –     | Optionaler öffentlicher Link zum Deployment-Verlauf bzw. Arcane-Projekt |
+| `HEALTH_PORT`    | `4100`       | Interner Port des Health-Dienstes (nur `127.0.0.1`, nie nach außen) |
+
+Docker Compose übergibt nur die Variablen, die in `docker-compose.yml` unter `environment` stehen; weitere dort ergänzen. Beim direkten Start über npm wird `.env` nicht automatisch geladen: Variablen in der Shell setzen, z. B. `PORT=4001 HEALTH_PORT=4101 npm start` (macOS/Linux).
+
+FlowVault startet den Health-Dienst selbst als Kindprozess und startet ihn nach einem Absturz neu. Fällt er aus, läuft FlowVault normal weiter, nur ohne Betriebsdaten. Core und Dienst teilen sich ein internes Token, das automatisch in `data/internal.token` liegt.
+
+## Backup von FlowVault selbst
+
+Sichere `flowvault.db` (SQLite, alle Versionen gzip-komprimiert) aus `DATA_DIR` und den verwendeten Schlüssel: entweder `secret.key` aus demselben Verzeichnis oder den Wert von `APP_SECRET` aus deiner Betriebskonfiguration. **Datenbank und Schlüssel zusammen sichern** – ohne Schlüssel müssen die API-Keys neu eingetragen werden und aktive 2FA kann nur mit Wiederherstellungscodes zurückgesetzt werden; die Workflow-Versionen bleiben lesbar. Die Wiederherstellungscodes zusätzlich sicher aufbewahren.
+
+Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flowvault` bzw. den lokalen Server beenden). Im laufenden Betrieb keine isolierte Kopie von `flowvault.db` anlegen: SQLite verwendet zusätzlich WAL-Dateien. Danach FlowVault wieder starten.
+
+`health.db` enthält abgeleitete Ausführungsdaten, Warnungen und die Einstellungen des Health-Dienstes. Vorhandene Ausführungen können erneut aus n8n geladen werden, soweit n8n sie noch gespeichert hat. Sichere die Datei ebenfalls, wenn du Einstellungen und Warnungszustände erhalten möchtest.
 
 ## Version und Updates
 
@@ -107,6 +133,8 @@ Der Build-Parameter `APP_REVISION` hinterlegt den gebauten Commit im Image. Ohne
 
 Für die vorhandene `docker-compose.arcane.yml` in **Arcane → Projekt → Build & Deploy** den neuen Stand bauen und deployen. Ein Neustart oder das reine Pullen eines Images übernimmt bei dieser `build:`-Konfiguration keinen neuen Quellcode. Ohne Docker: nach `git pull --ff-only` die Befehle `npm ci` und `npm run build` ausführen und den FlowVault-Prozess neu starten. Daten-Volume und `APP_SECRET` beibehalten.
 
+**Update von einer Version ohne E-Mail-Anmeldung:** Melde dich zunächst mit dem bisherigen Admin-Passwort an und hinterlege anschließend einmalig die Admin-E-Mail. Bis dahin sind die übrigen Funktionen gesperrt. Das bisherige Passwort bleibt erhalten; die Umstellung meldet andere Geräte ab.
+
 ### Update aus der Oberfläche anfordern
 
 Der Button **Update anfordern** wird verfügbar, sobald ein externer Deployment-Webhook konfiguriert ist. FlowVault bestätigt vor jeder Anfrage das aktuelle Passwort und bei aktiver 2FA zusätzlich einen frischen App- oder Wiederherstellungscode. Der Deployment-Dienst übernimmt den eigentlichen Neubau und Austausch des Containers; FlowVault braucht dafür keinen Docker-Socket und keine Schreibrechte auf seinen Quellcode.
@@ -126,36 +154,6 @@ Der Webhook erhält einen JSON-POST mit `app`, installierter `version`, bekannte
 **Arcane:** Nach dessen [Webhook-Dokumentation](https://getarcane.app/docs/reference/api) werden Webhooks unter **Settings → Webhooks** angelegt. Wähle nur das betroffene Projekt als Ziel. Ein Project-Redeploy-Webhook kann bereitgestellte Images aktualisieren; für unseren aktuellen Quellcode-Build reicht das allein nicht: Der angebundene Job muss **Build & Deploy** ausführen. Dafür beispielsweise einen eigenen Deployment-Job über einen Webhook ansteuern. Solange der nicht eingerichtet ist, direkt in Arcane bauen und deployen. `UPDATE_MANAGEMENT_URL` kann auf das Arcane-Projekt zeigen.
 
 Eine angenommene Anfrage bedeutet **nicht**, dass das Update erfolgreich installiert wurde. Den Verlauf beim Deployment-Dienst prüfen und nach Abschluss FlowVault neu laden; die angezeigte Version und Build-Informationen zeigen dann den laufenden Stand.
-
-## Konfiguration
-
-| Variable         | Standard     | Beschreibung |
-|------------------|--------------|--------------|
-| `PORT`           | `4000`       | HTTP-Port |
-| `HOST`           | `127.0.0.1`  | Bind-Adresse (`0.0.0.0` im Container) |
-| `DATA_DIR`       | `./data`     | Speicherort für Datenbank & Schlüssel |
-| `APP_SECRET`     | –            | Schlüssel für die API-Key-Verschlüsselung. Ohne: wird automatisch in `data/secret.key` erzeugt |
-| `ADMIN_PASSWORD` | –            | Festes Admin-Passwort statt Einrichtung im Browser |
-| `ADMIN_EMAIL`    | –            | Feste Admin-E-Mail; zusammen mit `ADMIN_PASSWORD` ohne Ersteinrichtung nutzbar. Ohne diese Variable wird die E-Mail im Browser hinterlegt |
-| `DEFAULT_LANGUAGE` | `de`       | `de` oder `en`: Sprache der Server-Logs und der KI-Änderungstexte sowie Ausweichsprache der Oberfläche (siehe [Sprachen](#sprachen)) |
-| `TRUST_PROXY`    | –            | `1` hinter einem Reverse Proxy (Pflicht, sonst greift die Login-Sperre für alle) |
-| `APP_REVISION`   | –            | Optionaler Docker-Build-Parameter für den gebauten Git-Commit |
-| `UPDATE_WEBHOOK_URL` | –        | Externer Deployment-Webhook (POST); ohne diesen ist der UI-Update-Button nicht aktiv |
-| `UPDATE_WEBHOOK_TOKEN` | –      | Optionaler Bearer-Token für den Deployment-Webhook, nur serverseitig verwendet |
-| `UPDATE_MANAGEMENT_URL` | –     | Optionaler öffentlicher Link zum Deployment-Verlauf bzw. Arcane-Projekt |
-| `HEALTH_PORT`    | `4100`       | Interner Port des Health-Dienstes (nur `127.0.0.1`, nie nach außen) |
-
-Docker Compose liest `.env` für die in `docker-compose.yml` referenzierten Variablen. Weitere Einstellungen müssen dort unter `environment` ergänzt werden. Beim direkten Start über npm wird `.env` nicht automatisch geladen: Variablen in der Shell setzen, z. B. `PORT=4001 HEALTH_PORT=4101 npm start` (macOS/Linux).
-
-FlowVault startet den Health-Dienst selbst als Kindprozess und startet ihn nach einem Absturz neu. Fällt er aus, läuft FlowVault normal weiter, nur ohne Betriebsdaten. Core und Dienst teilen sich ein internes Token, das automatisch in `data/internal.token` liegt.
-
-## Sprachen
-
-Die Oberfläche gibt es auf **Deutsch** und **Englisch**. Sie folgt zunächst der Browsersprache; im Sprachwähler auf der Anmeldeseite und unter **Einstellungen → Sprache** lässt sie sich pro Browser umstellen. Fehlermeldungen des Servers erscheinen in derselben Sprache.
-
-Mit `DEFAULT_LANGUAGE=en` (in der `.env` bzw. in Arcane) schreibt FlowVault Server-Logs – z. B. den Einrichtungscode in `docker logs flowvault` – und neue KI-Änderungstexte auf Englisch; die Oberfläche greift darauf zurück, wenn der Browser keine unterstützte Sprache meldet. Die Sprache der KI-Texte lässt sich zusätzlich unter **Einstellungen → KI-Änderungstexte** wählen.
-
-Weitere Sprachen sind ein Ordner mit Textdateien, ohne Eingriff in den Programmcode: [docs/I18N.md](docs/I18N.md).
 
 ## Umgebungen: Staging → Produktion
 
@@ -184,13 +182,29 @@ GitHub sieht nur den Code, nicht den laufenden Betrieb. FlowVault verbindet beid
 
 Alle Schwellenwerte stehen unter **Einstellungen → Fehlerquote pro Version**.
 
+## KI-Änderungstexte (optional)
+
+Über [Melious](https://melious.ai) schreibt ein Modell auf EU-Infrastruktur zu jeder neuen Version einen Titel im Commit-Stil plus Stichpunkte. Einrichtung unter **Einstellungen → KI-Änderungstexte**: einschalten und API-Key hinterlegen; dort wählst du auch die Sprache der Texte (siehe [Sprachen](#sprachen)). Ohne API-Key wird nichts an eine KI gesendet.
+
+- **Was gesendet wird**: nur die geänderten Nodes und Parameter. Den ganzen Workflow nur, wenn du für eine erste Version selbst einen Text anforderst.
+- **Was vorher entfernt wird**: Werte von Feldern, Headern und Parametern wie `password`, `token`, `apiKey`, `key`, `Authorization` oder `X-…-Auth`, typische Key-Formate (Bearer, JWT, `sk_…`, `ghp_…`, AWS, Telegram), Zugangsdaten in URLs (`benutzer:passwort@host`), Webhook-Adressen von Slack und Discord sowie lange, zufällig wirkende Zeichenfolgen (z. B. Hex- oder Base64-Schlüssel als Konstante im Code).
+- **Grenzen**: Das ist eine Heuristik. Zugangsdaten gehören in n8n-Credentials, nicht in Code-Nodes. Was tatsächlich gesendet würde, zeigt der Mock mit `MOCK_LOG_PROMPT=1` (siehe [Entwicklung](#entwicklung)).
+
+## Sprachen
+
+Die Oberfläche gibt es auf **Deutsch** und **Englisch**. Sie folgt zunächst der Browsersprache; im Sprachwähler auf der Anmeldeseite und unter **Einstellungen → Sprache** lässt sie sich pro Browser umstellen. Fehlermeldungen des Servers erscheinen in derselben Sprache.
+
+Mit `DEFAULT_LANGUAGE=en` (in der `.env` bzw. in Arcane) schreibt FlowVault Server-Logs – z. B. den Einrichtungscode in `docker logs flowvault` – und neue KI-Änderungstexte auf Englisch; die Oberfläche greift darauf zurück, wenn der Browser keine unterstützte Sprache meldet. Die Sprache der KI-Texte lässt sich zusätzlich unter **Einstellungen → KI-Änderungstexte** wählen.
+
+Weitere Sprachen sind ein Ordner mit Textdateien, ohne Eingriff in den Programmcode: [docs/I18N.md](docs/I18N.md).
+
 ## Sicherheit
 
 Wer in FlowVault angemeldet ist, kann Workflows in alle verbundenen n8n-Instanzen schreiben. Deshalb:
 
 - **Einrichtung nur mit Code** aus dem Server-Log.
 - **Login-Sperre**: Nach 5 falschen Versuchen (Login, Einrichtung, Passwort- oder Code-Bestätigung) sperrt FlowVault die Adresse mit wachsender Wartezeit (1 bis 15 Minuten). IPv6-Adressen zählen pro /64-Netz. Gleichzeitig gesendete Versuche werden nicht öfter geprüft als nacheinander gesendete. Über alle Adressen hinweg pausiert die Anmeldung nach 50 Fehlversuchen innerhalb von 15 Minuten, bis das Zeitfenster abläuft. Das bremst Angriffe von vielen Adressen, kann dich während eines laufenden Angriffs aber auch selbst aussperren; bestehende Sitzungen bleiben gültig.
-- **Admin-Konto**: Anmeldung mit E-Mail und Passwort. Die E-Mail wird als Anmeldename verwendet, nicht per Mail bestätigt. Mailversand und Passwort-Reset per E-Mail sind noch nicht implementiert. Über `ADMIN_EMAIL` bzw. `ADMIN_PASSWORD` konfigurierte Werte können nicht im Browser geändert werden; 2FA bleibt auch mit diesen Variablen erforderlich.
+- **Admin-Konto**: Anmeldung mit E-Mail und Passwort. Die E-Mail wird als Anmeldename verwendet, nicht per Mail bestätigt. Mailversand und Passwort-Reset per E-Mail sind noch nicht implementiert. Über `ADMIN_EMAIL` bzw. `ADMIN_PASSWORD` konfigurierte Werte können nicht im Browser geändert werden. 2FA lässt sich auch mit diesen Variablen aktivieren und gilt dann zusätzlich zum Passwort.
 - **2FA (optional)**: Unter **Einstellungen → Zwei-Faktor-Authentifizierung** mit dem aktuellen Passwort starten, QR-Code mit einer Authenticator-App scannen (oder Schlüssel manuell eingeben) und einen sechsstelligen App-Code bestätigen. Die Einrichtung ist zehn Minuten gültig und bis zur Bestätigung nicht aktiv. Das TOTP-Geheimnis wird mit AES-256-GCM verschlüsselt gespeichert. App-Codes gelten für 30 Sekunden, mit einem Zeitschritt Toleranz in beide Richtungen; akzeptierte Codes können nicht wiederverwendet werden. Server und Handy sollten eine synchronisierte Uhr haben.
 - **Wiederherstellungscodes**: Bei Aktivierung werden zehn zufällige Codes einmalig angezeigt und können als Textdatei heruntergeladen werden. Sicher getrennt vom Passwort aufbewahren. Ein Code ersetzt einmalig den App-Code, das Passwort bleibt nötig. Gespeichert werden nur SHA-256-Hashes. Neue Codes können mit Passwort und einem gültigen App- oder Wiederherstellungscode erstellt werden; damit werden alle alten Codes ungültig. Bei verlorenem Handy mit einem Wiederherstellungscode anmelden und mit einem weiteren Code 2FA deaktivieren, dann neu einrichten.
 - **Anmeldung mit 2FA**: Nach gültiger E-Mail und Passwort gibt es nur eine fünf Minuten gültige Anmeldeprüfung, noch keine Sitzung oder API-Zugriff. Nach fünf falschen Codes wird diese Prüfung auch bei wechselnder IP ungültig. QR-Einrichtungen sind an die angemeldete Sitzung gebunden und werden nach fünf falschen Codes verworfen.
@@ -203,13 +217,26 @@ Wer in FlowVault angemeldet ist, kann Workflows in alle verbundenen n8n-Instanze
 
 Gut zu wissen: Die Snapshots enthalten auch Pin-Data (Testdaten) und `staticData` der Workflows. Sie liegen komprimiert, aber nicht verschlüsselt in der Datenbank – bei personenbezogenen Testdaten die Datenbank entsprechend schützen.
 
-## Backup von FlowVault selbst
+Sicherheitslücken bitte vertraulich gemäß [SECURITY.md](SECURITY.md) melden, nicht als öffentliches Issue.
 
-Sichere `flowvault.db` (SQLite, alle Versionen gzip-komprimiert) aus `DATA_DIR` und den verwendeten Schlüssel: entweder `secret.key` aus demselben Verzeichnis oder den Wert von `APP_SECRET` aus deiner Betriebskonfiguration. **Datenbank und Schlüssel zusammen sichern** – ohne Schlüssel müssen die API-Keys neu eingetragen werden und aktive 2FA kann nur mit Wiederherstellungscodes zurückgesetzt werden; die Workflow-Versionen bleiben lesbar. Die Wiederherstellungscodes zusätzlich sicher aufbewahren.
+## Entwicklung
 
-Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flowvault` bzw. den lokalen Server beenden). Im laufenden Betrieb keine isolierte Kopie von `flowvault.db` anlegen: SQLite verwendet zusätzlich WAL-Dateien. Danach FlowVault wieder starten.
+Nach `npm ci` startest du die Entwicklung mit `npm run dev`. Den Mock und die folgenden Testbefehle führst du jeweils in einem weiteren Terminal aus. In FlowVault verbindest du den Mock über `http://localhost:5679` mit dem API-Key `test-key`; eine echte n8n-Instanz ist dafür nicht nötig.
 
-`health.db` enthält abgeleitete Ausführungsdaten, Warnungen und die Einstellungen des Health-Dienstes. Vorhandene Ausführungen können erneut aus n8n geladen werden, soweit n8n sie noch gespeichert hat. Sichere die Datei ebenfalls, wenn du Einstellungen und Warnungszustände erhalten möchtest.
+```bash
+npm run dev          # API (Port 4000, startet den Health-Dienst mit) + Vite-Frontend (http://localhost:5173)
+npm run mock-n8n     # Fake-n8n auf Port 5679, API-Key: test-key, erzeugt laufend Ausführungen
+MOCK_ENV=Prod MOCK_PORT=5680 npm run mock-n8n   # zweite Fake-Instanz mit eigenen IDs – für Umgebungen (Staging → Prod)
+curl -X POST localhost:5679/_mock/mutate   # simuliert eine Workflow-Änderung
+curl -X POST localhost:5679/_mock/break    # Änderung, nach der ein Node in 40 % der Läufe scheitert
+curl -X POST 'localhost:5679/_mock/run?n=30'  # sofort 30 Läufe pro aktivem Workflow
+npm test             # Auth-/2FA-Tests, Umgebungs-Zuordnungen, Health-Auswertung und Übersetzungen
+# Der Mock spielt auch Melious: API-Adresse http://localhost:5679/v1, Key test-ai-key
+MOCK_LOG_PROMPT=1 npm run mock-n8n          # zeigt, was an die KI gesendet würde
+npm run typecheck
+```
+
+Vor einem Pull Request: Version erhöhen und Prüfungen ausführen, siehe [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Architektur
 
@@ -221,37 +248,44 @@ server/          Node.js + Express (TypeScript, läuft nativ ohne Build)
   updates.ts     Optionaler externer Deployment-Webhook
   auth.ts        Passwortprüfung, Sitzungen und Login-Sperre
   two-factor.ts  TOTP-Prüfung, Replay-Schutz und Wiederherstellungscodes
+  dashboard.ts   Gespeicherte Dashboard-Auswahl (/api/dashboard/layout)
   sync.ts        Sync-Engine, Scheduler, Wiederherstellen
   n8n.ts         Client für die n8n Public API
+  net.ts         Ausgehende Requests: keine Weiterleitungen, Sperre für Cloud-Metadaten
   internal.ts    Interne API für Dienste (Token) + Weiterleitung /api/health → Health-Dienst
   ai.ts          KI-Änderungstexte über Melious, Warteschlange, Secret-Filter
-  promote/        Umgebungen (Staging → Prod): Instanzpaare, Workflow-Paarungen, ID-Zuordnungen, Übernahmeplanung und Drift
-    transform.ts  Ersetzt IDs in Snapshots – rein funktional + Tests
+  promote/       Umgebungen (Staging → Prod)
+    pairs.ts     Instanzpaare und Entscheidungen zum Neuanlegen
     mappings.ts  Zuordnungs-Speicher, Vorschläge, Workflow-Paarung
-    drift.ts      Abweichungen zwischen zwei Instanzen
-    promote.ts    Übernahme auf die Ziel-Instanz
-    router.ts     HTTP-API des Moduls (/api/promote)
+    plan.ts      Schreibfreie Übernahmeplanung, Abhängigkeiten vor Aufrufern
+    transform.ts Ersetzt IDs in Snapshots – rein funktional + Tests
+    drift.ts     Abweichungen zwischen zwei Instanzen
+    promote.ts   Übernahme auf die Ziel-Instanz
+    router.ts    HTTP-API des Moduls (/api/promote)
   db.ts          SQLite-Schema (node:sqlite)
   crypto.ts      Verschlüsselung, Passwort-Hashing, Kompression
   services.ts    Startet und überwacht den Health-Dienst (Kindprozess)
 services/health/ Health-Dienst: Ausführungen ↔ Versionen, Fehlerquoten, Warnungen
   index.ts       HTTP-API (nur für den Core)
+  core.ts        Client für die interne API des Cores
   poller.ts      Holt Ausführungen über den Core
   analysis.ts    Reine Auswertung (Zuordnung, Fehlerquote, Rollback-Vorschlag) + Tests
   evaluate.ts    Verknüpft Auswertung mit Versionen, pflegt Warnungen
   db.ts          Eigene SQLite-Datenbank (health.db)
-shared/diff.ts   Workflow-Vergleich (Server & Browser)
-shared/i18n/     Sprachen: Übersetzer und Texte (Deutsch, Englisch), von Server und Browser genutzt
-shared/executions.ts  Ausführungen reduzieren, Typen für Core, Dienst & Browser
+shared/          Von Server, Dienst und Browser gemeinsam genutzt
+  diff.ts        Workflow-Vergleich
+  executions.ts  Ausführungen reduzieren, Typen für Core, Dienst & Browser
+  dashboard.ts   Widget-IDs, Speicherformat und Validierung des Dashboards
+  i18n/          Sprachen: Übersetzer und Texte (Deutsch, Englisch)
 web/             React + Tailwind (Vite)
-scripts/         Mock-n8n zum Testen
+scripts/         Mock-n8n zum Testen, Versionsprüfung, Git-Hook-Installation, Build-Infos
 ```
 
-## Beiträge und GitHub
+## Beiträge
 
-Hinweise für Entwicklung, Fehlermeldungen und Pull Requests stehen in [CONTRIBUTING.md](CONTRIBUTING.md). Die GitHub Actions unter [`.github/workflows/ci.yml`](.github/workflows/ci.yml) prüfen Tests, TypeScript und den Frontend-Build mit Node.js 22.18 und 24.
+Hinweise für Entwicklung, Fehlermeldungen und Pull Requests stehen in [CONTRIBUTING.md](CONTRIBUTING.md), der Ablauf für Versionsnummern in [docs/VERSIONING.md](docs/VERSIONING.md). Die GitHub Actions unter [`.github/workflows/ci.yml`](.github/workflows/ci.yml) prüfen Versionssprung, Tests, TypeScript und den Frontend-Build mit Node.js 22.18 und 24.
 
-Die Schritte für die erste Veröffentlichung dieses Repositorys stehen in [docs/GITHUB.md](docs/GITHUB.md). Sicherheitsprobleme bitte gemäß [SECURITY.md](SECURITY.md) vertraulich melden.
+Sicherheitsprobleme bitte nicht als Issue, sondern vertraulich gemäß [SECURITY.md](SECURITY.md) melden.
 
 ## Lizenz
 

@@ -1,6 +1,6 @@
 {
   "name": "flowvault",
-  "version": "0.2.4",
+  "version": "0.2.6",
   "private": true,
   "license": "MIT",
   "description": "Versionierung & Backup für n8n-Workflows – wie GitHub, nur für n8n.",
