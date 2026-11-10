@@ -5,6 +5,7 @@
 ## Prüfung
 
 - [ ] Projektversion erhöht (`package.json` und `package-lock.json`)
+- [ ] `CHANGELOG.md` unter `[Unreleased]` ergänzt (entfällt bei rein internen Änderungen)
 
 <!-- Welche Prüfungen wurden ausgeführt und mit welchem Ergebnis?
      npm test · npm run typecheck · npm run build

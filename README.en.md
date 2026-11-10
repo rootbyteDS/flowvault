@@ -117,7 +117,7 @@ For a simple file copy, stop FlowVault first (`docker compose stop flowvault` or
 
 ## Version and updates
 
-Every completed project change receives a higher version. The Git hook and CI enforce version updates; see [versioning](docs/VERSIONING.md) (German).
+What changed between releases is listed in the [changelog](CHANGELOG.md) (German) and on the [Releases](https://github.com/rootbyteDS/flowvault/releases) page. Every completed project change receives a higher version; selected states are published as releases. The Git hook, CI and the release process are described in [versioning](docs/VERSIONING.md) (German).
 
 The installed version number is shown at the bottom of the sidebar. Clicking it opens **Settings → About FlowVault**. There you also see the Git commit (if known) and, in the Docker image, the build date. Local changes are marked separately. The information comes from the running server, not from a version number hard-coded in the frontend. There is currently no automatic check for newer releases.
 

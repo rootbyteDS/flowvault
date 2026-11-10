@@ -56,6 +56,50 @@ verhindert, muss der Repository-Betreiber die CI-Jobs in den GitHub-Branchregeln
 als erforderlich festlegen. Git-Hooks lassen sich lokal technisch umgehen; sie
 sind keine Zugriffssperre.
 
+## Changelog
+
+[`CHANGELOG.md`](../CHANGELOG.md) beschreibt Änderungen für Nutzer und Betreiber im
+Format „Keep a Changelog“. Jede für sie sichtbare Änderung bekommt im selben Commit
+einen Eintrag unter `## [Unreleased]`, eingeordnet in `### Hinzugefügt`, `### Geändert`,
+`### Behoben`, `### Entfernt` oder `### Sicherheit`. Einträge beschreiben die Wirkung
+(„Login-Sperre gilt auch für parallele Versuche“), nicht die Umsetzung. Rein interne
+Änderungen wie Refactoring, Tests oder CI-Anpassungen brauchen keinen Eintrag.
+Hinweise für bestehende Installationen, etwa neue Pflicht-Variablen oder
+Migrationen, gehören immer hinein.
+
+Nicht jede Versionsnummer ist ein Release: Die Patch-Version steigt mit jeder
+Änderung, der Changelog führt nur veröffentlichte Releases. `npm run changelog:check`
+prüft den Aufbau (Abschnitt `[Unreleased]` zuerst, Versionen mit Datum, absteigend
+sortiert, keine Version über der Projektversion); die CI führt die Prüfung ebenfalls aus.
+
+## Release veröffentlichen
+
+Ein Release ist ein bewusst gesetzter Stand auf `main`. Vorbereitung als eigener Commit:
+
+1. Version festlegen: `npm version minor --no-git-tag-version` für neue Funktionen,
+   `patch` für reine Korrekturen, `major` ab 1.0 für inkompatible Änderungen.
+2. In `CHANGELOG.md` die Überschrift `## [Unreleased]` in
+   `## [X.Y.Z] – JJJJ-MM-TT` umbenennen, darüber einen neuen leeren Abschnitt
+   `## [Unreleased]` anlegen und die Links am Dateiende ergänzen:
+   ```
+   [Unreleased]: https://github.com/rootbyteDS/flowvault/compare/vX.Y.Z...HEAD
+   [X.Y.Z]: https://github.com/rootbyteDS/flowvault/compare/vVORHER...vX.Y.Z
+   ```
+3. `npm run changelog:check`, `npm test`, `npm run typecheck` und `npm run build`
+   ausführen, committen, auf `main` pushen und die CI abwarten.
+4. Tag setzen und pushen:
+   ```bash
+   git tag -a vX.Y.Z -m "FlowVault X.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+Der Workflow [`release.yml`](../.github/workflows/release.yml) prüft dann, dass der Tag
+auf `main` liegt und zur Version in `package.json` passt, führt Tests, TypeScript-Prüfung
+und Build aus und erstellt das GitHub-Release mit dem Abschnitt der Version aus dem
+Changelog als Text. Schlägt eine Prüfung fehl, entsteht kein Release; nach der Korrektur
+den Tag löschen (`git push --delete origin vX.Y.Z`, `git tag -d vX.Y.Z`) und neu setzen.
+Den Text eines bestehenden Releases zeigt `node scripts/changelog.ts notes X.Y.Z`.
+
 ## Anzeige und Builds
 
 Die Anwendung liest ihre Versionsnummer weiterhin aus `package.json`. Ein neuer

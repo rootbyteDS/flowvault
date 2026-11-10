@@ -17,4 +17,14 @@
 - Den Versionshook und die CI-Prüfung nicht umgehen. Sie ergänzen diese Regel;
   der Hook allein reicht vor einer Übergabe ohne Commit nicht aus.
 
+## Changelog pflegen
+
+- Jede für Nutzer oder Betreiber sichtbare Änderung im selben Schritt in
+  `CHANGELOG.md` unter `## [Unreleased]` eintragen (Hinzugefügt, Geändert, Behoben,
+  Entfernt, Sicherheit). Rein interne Änderungen (Refactoring, Tests, CI) brauchen
+  keinen Eintrag.
+- `npm run changelog:check` vor der Übergabe ausführen.
+- Releases (Tag `vX.Y.Z`) nur auf ausdrücklichen Wunsch vorbereiten, taggen oder
+  pushen. Ablauf: [docs/VERSIONING.md](docs/VERSIONING.md#release-veröffentlichen).
+
 Details und Ausnahmen für technische Erst-Commits: [docs/VERSIONING.md](docs/VERSIONING.md).

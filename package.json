@@ -1,6 +1,6 @@
 {
   "name": "flowvault",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "description": "Versionierung & Backup für n8n-Workflows – wie GitHub, nur für n8n.",
@@ -12,10 +12,11 @@
     "prepare": "node scripts/install-hooks.ts",
     "version:bump": "node scripts/version.ts bump",
     "version:check": "node scripts/version.ts check",
+    "changelog:check": "node scripts/changelog.ts check",
     "dev": "concurrently -n api,web -c magenta,cyan \"node --watch-path=server --watch-path=services --watch-path=shared server/index.ts\" \"vite\"",
     "build": "vite build && node scripts/build-info.ts",
     "start": "NODE_ENV=production node server/index.ts",
-    "test": "node --test scripts/version.test.ts shared/i18n/i18n.test.ts server/auth.test.ts server/ai.test.ts server/updates.test.ts server/promote/transform.test.ts server/promote/promote.test.ts services/health/analysis.test.ts web/src/heatmap.test.ts",
+    "test": "node --test scripts/version.test.ts scripts/changelog.test.ts shared/i18n/i18n.test.ts server/auth.test.ts server/ai.test.ts server/updates.test.ts server/promote/transform.test.ts server/promote/promote.test.ts services/health/analysis.test.ts web/src/heatmap.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "mock-n8n": "node scripts/mock-n8n.ts"
   },

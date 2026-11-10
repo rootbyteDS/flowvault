@@ -115,7 +115,7 @@ Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flo
 
 ## Version und Updates
 
-Jede abgeschlossene Projektänderung erhält eine höhere Version. Versionshook, CI-Prüfung und Ablauf sind unter [Versionierung](docs/VERSIONING.md) beschrieben.
+Was sich zwischen den Releases geändert hat, steht im [Changelog](CHANGELOG.md) und auf der Seite [Releases](https://github.com/rootbyteDS/flowvault/releases). Jede abgeschlossene Projektänderung erhält eine höhere Version, veröffentlicht werden ausgewählte Stände als Release. Versionshook, CI-Prüfung und Release-Ablauf sind unter [Versionierung](docs/VERSIONING.md) beschrieben.
 
 Die installierte Versionsnummer steht unten in der Seitenleiste. Ein Klick darauf öffnet **Einstellungen → Über FlowVault**. Dort siehst du zusätzlich den Git-Commit (falls bekannt) und im Docker-Image das Build-Datum. Lokale Änderungen werden gesondert markiert. Die Angaben kommen vom laufenden Server, nicht aus einer fest eingetragenen Versionsnummer im Frontend. Es gibt derzeit keine automatische Prüfung auf neuere Releases.
 

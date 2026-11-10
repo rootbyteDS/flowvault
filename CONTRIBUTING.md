@@ -21,6 +21,11 @@ Jede abgeschlossene Änderung braucht eine höhere Projektversion. Mit
 Versionssprung vor dem Commit; die CI prüft zusätzlich gegen den Vergleichsstand.
 Details: [Versionierung](docs/VERSIONING.md).
 
+Für Nutzer oder Betreiber sichtbare Änderungen zusätzlich in [CHANGELOG.md](CHANGELOG.md)
+unter `## [Unreleased]` eintragen (Hinzugefügt, Geändert, Behoben, Entfernt oder
+Sicherheit). Rein interne Änderungen brauchen keinen Eintrag. `npm run changelog:check`
+prüft den Aufbau.
+
 Vor einem Pull Request:
 
 ```bash

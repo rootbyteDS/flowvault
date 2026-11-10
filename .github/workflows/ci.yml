@@ -35,6 +35,8 @@ jobs:
         env:
           VERSION_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: npm run version:check
+      - name: Changelog prüfen
+        run: npm run changelog:check
       - name: Tests
         run: npm test
       - name: TypeScript prüfen
