@@ -1,9 +1,9 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import QRCode from 'qrcode';
 import {
-  adminEmail, checkPassword, consumeSetupCode, createSession, destroyAllSessions, destroySession,
-  isAuthenticated, isSetUp, loginFailed, loginSucceeded, loginThrottle, readCookie, requireAuth,
-  requireSession, sessionHash, setAuthCookie,
+  addressKey, adminEmail, checkPassword, consumeSetupCode, createSession, destroyAllSessions, destroySession,
+  isAuthenticated, isSetUp, loginThrottle, readCookie, requireAuth, requireSession, sessionHash, setAuthCookie,
+  type LoginThrottle,
 } from './auth.ts';
 import { decrypt, encrypt, hashPassword, randomToken, safeEqual, sha256 } from './crypto.ts';
 import { db, getSetting, setSetting, tx } from './db.ts';
@@ -45,12 +45,21 @@ function rotateSession(req: Request, res: Response) {
 }
 
 /** Separate router so the full authentication boundary can be tested without n8n/services. */
-export function createAuthRouter(clientIp: (req: Request) => string, updateService: ReturnType<typeof createUpdateService> = updates) {
+export function createAuthRouter(
+  clientIp: (req: Request) => string,
+  updateService: ReturnType<typeof createUpdateService> = updates,
+  attempts: LoginThrottle = loginThrottle,
+) {
   const router = Router();
-  const ip = (req: Request) => `auth:${clientIp(req)}`;
-  function throttle(req: Request, _res: Response, next: NextFunction) {
-    const wait = loginThrottle(ip(req));
+  const ip = (req: Request) => `auth:${addressKey(clientIp(req))}`;
+  function throttle(req: Request, res: Response, next: NextFunction) {
+    const key = ip(req);
+    const wait = attempts.wait(key);
     if (wait) fail(429, 'errors.auth.throttled', { seconds: wait });
+    // Bis die Antwort draußen ist, zählt der Versuch als laufend – auch während er auf scrypt wartet
+    const done = attempts.begin(key);
+    res.once('finish', done);
+    res.once('close', done);
     next();
   }
   const revision = () => getSetting('auth_revision') ?? '';
@@ -64,7 +73,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     const valid = await checkPassword(String(req.body?.current ?? ''));
     assertFresh(req, before);
     if (!valid || (factor && twoFactorEnabled() && !consumeSecondFactor(String(req.body?.factor ?? '')))) {
-      loginFailed(ip(req));
+      attempts.failed(ip(req));
       fail(401, 'errors.auth.reauthFailed');
     }
     return before;
@@ -87,7 +96,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     if (process.env.ADMIN_EMAIL && email !== adminEmail()) fail(400, 'errors.auth.emailMustMatchEnv');
     const password = passwordInput(req.body?.password);
     if (!consumeSetupCode(String(req.body?.code ?? ''))) {
-      loginFailed(ip(req));
+      attempts.failed(ip(req));
       fail(403, 'errors.auth.wrongSetupCode');
     }
     const hashed = await hashPassword(password);
@@ -97,7 +106,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       setSetting('admin_email', email);
       rotateSession(req, res);
     });
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ ok: true });
   });
 
@@ -106,7 +115,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     const valid = await checkPassword(String(req.body?.password ?? ''));
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     if (!valid || (adminEmail() && !safeEqual(email, adminEmail())) || before !== revision()) {
-      loginFailed(ip(req));
+      attempts.failed(ip(req));
       fail(401, 'errors.auth.wrongCredentials');
     }
     clearLogin(req, res);
@@ -118,7 +127,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       setAuthCookie(req, res, LOGIN_COOKIE, token, LOGIN_TTL);
       return res.json({ twoFactorRequired: true });
     }
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     createSession(req, res);
     res.json({ ok: true });
   });
@@ -129,12 +138,12 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     if (!challenge) fail(401, 'errors.auth.loginExpired');
     if (!consumeSecondFactor(String(req.body?.factor ?? ''))) {
       db.prepare('UPDATE auth_challenges SET attempts = attempts + 1 WHERE token = ?').run(challenge.token);
-      loginFailed(ip(req));
+      attempts.failed(ip(req));
       if (challenge.attempts >= 4) clearLogin(req, res);
       fail(401, challenge.attempts >= 4 ? 'errors.auth.tooManyCodesLogin' : 'errors.auth.wrongFactor');
     }
     clearLogin(req, res);
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     createSession(req, res);
     res.json({ ok: true });
   });
@@ -157,7 +166,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       setSetting('admin_email', email);
       rotateSession(req, res);
     });
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ ok: true });
   });
 
@@ -169,7 +178,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     assertFresh(req, proof);
     // The deployment may replace this process. Acknowledgement is not installation success.
     const result = await updateService.trigger();
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.status(202).json(result);
   });
 
@@ -184,7 +193,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       setSetting('admin_password', hashed);
       rotateSession(req, res);
     });
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ ok: true });
   });
 
@@ -199,7 +208,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     db.prepare('INSERT INTO auth_challenges (token, kind, session_token, secret_enc, expires_at) VALUES (?, ?, ?, ?, ?)').run(
       sha256(randomToken()), 'enroll', sessionHash(req), encrypt(secret), Date.now() + ENROLL_TTL,
     );
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ secret, qrCode });
   });
 
@@ -213,7 +222,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
     if (counter === null) {
       db.prepare('UPDATE auth_challenges SET attempts = attempts + 1 WHERE token = ?').run(challenge.token);
       if (challenge.attempts >= 4) db.prepare('DELETE FROM auth_challenges WHERE token = ?').run(challenge.token);
-      loginFailed(ip(req));
+      attempts.failed(ip(req));
       fail(400, challenge.attempts >= 4 ? 'errors.auth.tooManyCodesEnroll' : 'errors.auth.wrongAuthenticatorCode');
     }
     const codes = tx(() => {
@@ -223,7 +232,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       rotateSession(req, res);
       return codes;
     });
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ codes });
   });
 
@@ -240,7 +249,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       db.prepare("DELETE FROM settings WHERE key IN ('admin_totp_secret', 'admin_totp_counter', 'admin_recovery_hashes')").run();
       rotateSession(req, res);
     });
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ ok: true });
   });
 
@@ -253,7 +262,7 @@ export function createAuthRouter(clientIp: (req: Request) => string, updateServi
       rotateSession(req, res);
       return codes;
     });
-    loginSucceeded(ip(req));
+    attempts.succeeded(ip(req));
     res.json({ codes });
   });
 

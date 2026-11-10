@@ -16,7 +16,7 @@ delete process.env.ADMIN_PASSWORD;
 delete process.env.ADMIN_EMAIL;
 delete process.env.APP_SECRET;
 const { db, getSetting, setSetting } = await import('./db.ts');
-const { announceSetupCode, requireAuth, setPassword } = await import('./auth.ts');
+const { addressKey, announceSetupCode, createLoginThrottle, requireAuth, setPassword } = await import('./auth.ts');
 const { createAuthRouter } = await import('./auth-router.ts');
 const { createDashboardRouter } = await import('./dashboard.ts');
 const { decrypt, sha256 } = await import('./crypto.ts');
@@ -35,7 +35,9 @@ const now = 1_750_000_005_000;
 
 const app = express();
 app.use(express.json());
-app.use('/api/auth', createAuthRouter((req) => String(req.headers['x-test-ip']), updateService));
+// Date.now steht in den Tests still, die Bremse über alle Adressen würde sich also über alle Tests aufsummieren.
+// Sie wird unten mit eigenen Instanzen geprüft.
+app.use('/api/auth', createAuthRouter((req) => String(req.headers['x-test-ip']), updateService, createLoginThrottle({ globalLimit: 10_000 })));
 app.get('/api/protected', requireAuth, (_req, res) => res.json({ ok: true }));
 app.use('/api/dashboard', requireAuth, createDashboardRouter());
 app.use((err: Error & { status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -66,7 +68,7 @@ after(async () => {
 
 class Browser {
   cookies = new Map<string, string>();
-  ip = crypto.randomUUID();
+  ip: string = crypto.randomUUID();
   async request(route: string, body?: unknown, ip = this.ip, method = body === undefined ? 'GET' : 'POST') {
     const response = await fetch(`${baseUrl}${route}`, {
       method,
@@ -243,6 +245,105 @@ test('IP throttling applies to password attempts and cannot be reset by passing 
   assert.equal((await browser.login()).status, 200);
   assert.equal((await browser.request('/auth/login/verify', { factor: 'wrong' })).status, 401);
   assert.equal((await browser.login()).status, 429);
+});
+
+test('parallel password attempts are not checked more often than sequential ones', async () => {
+  await configured();
+  const ip = crypto.randomUUID();
+  const burst = await Promise.all(Array.from({ length: 20 }, (_, i) => new Browser().request('/auth/login', { email, password: `wrong-${i}` }, ip)));
+  let checked = burst.filter((r) => r.status === 401).length;
+  assert.ok(checked >= 1 && checked <= 5, `${checked} parallel attempts were checked`);
+  assert.equal(burst.filter((r) => r.status === 429).length, 20 - checked);
+  // Falls nicht alle fünf gleichzeitig ankamen: nacheinander auffüllen. Insgesamt bleibt es bei fünf Prüfungen.
+  for (; checked < 5; checked++) assert.equal((await new Browser().request('/auth/login', { email, password: 'wrong' }, ip)).status, 401);
+  assert.equal((await new Browser().request('/auth/login', { email, password }, ip)).status, 429);
+});
+
+test('IPv6 attempts count per /64 network', async () => {
+  await configured();
+  for (let i = 1; i <= 5; i++) {
+    assert.equal((await new Browser().request('/auth/login', { email, password: 'wrong' }, `2001:db8:aa:1::${i}`)).status, 401);
+  }
+  assert.equal((await new Browser().request('/auth/login', { email, password }, '2001:db8:aa:1:ffff:ffff:ffff:ffff')).status, 429);
+  assert.equal((await new Browser().request('/auth/login', { email, password }, '2001:db8:aa:2::1')).status, 200);
+});
+
+test('throttle keys group IPv6 by /64 and unwrap IPv4-mapped addresses', () => {
+  assert.equal(addressKey('2001:db8:1:2::1'), '2001:0db8:0001:0002::/64');
+  assert.equal(addressKey('2001:0db8:0001:0002:ffff:0:0:9'), addressKey('2001:db8:1:2::1'));
+  assert.notEqual(addressKey('2001:db8:1:3::1'), addressKey('2001:db8:1:2::1'));
+  assert.equal(addressKey('fe80::1%eth0'), addressKey('fe80::2'));
+  assert.equal(addressKey('::1'), '0000:0000:0000:0000::/64');
+  assert.equal(addressKey('64:ff9b::192.0.2.7'), '0064:ff9b:0000:0000::/64');
+  assert.equal(addressKey('::ffff:192.0.2.7'), '192.0.2.7');
+  assert.equal(addressKey('::ffff:c000:207'), '192.0.2.7');
+  assert.equal(addressKey('192.0.2.7'), '192.0.2.7');
+  assert.equal(addressKey('unknown'), 'unknown');
+});
+
+test('throttle counts running checks and allows only one check at a time after a lock', (t) => {
+  let clock = now;
+  t.mock.method(Date, 'now', () => clock);
+  const throttle = createLoginThrottle({ globalLimit: 10_000 });
+  const running = Array.from({ length: 5 }, () => {
+    assert.equal(throttle.wait('a'), 0);
+    return throttle.begin('a');
+  });
+  assert.equal(throttle.wait('a'), 1);
+  assert.equal(throttle.wait('b'), 0);
+  // Ein Versuch ohne Ergebnis (z. B. ungültige Eingabe) gibt seinen Platz wieder frei
+  running.pop()!();
+  assert.equal(throttle.wait('a'), 0);
+  running.push(throttle.begin('a'));
+  for (const release of running) {
+    throttle.failed('a');
+    release();
+    release();
+  }
+  assert.equal(throttle.wait('a'), 60);
+  clock += 60_000;
+  assert.equal(throttle.wait('a'), 0);
+  const single = throttle.begin('a');
+  assert.equal(throttle.wait('a'), 1);
+  throttle.failed('a');
+  single();
+  assert.equal(throttle.wait('a'), 120);
+  // Erfolg setzt die Adresse zurück
+  clock += 120_000;
+  throttle.succeeded('a');
+  assert.equal(throttle.wait('a'), 0);
+});
+
+test('throttle brakes failures and parallel checks across all addresses', (t) => {
+  let clock = now;
+  t.mock.method(Date, 'now', () => clock);
+  const global = createLoginThrottle({ globalLimit: 3, globalWindow: 60_000 });
+  global.failed('x');
+  global.failed('y');
+  const running = global.begin('z');
+  // Zwei Fehlversuche plus eine laufende Prüfung erreichen die Grenze
+  assert.equal(global.wait('fresh'), 1);
+  global.failed('z');
+  running();
+  assert.equal(global.wait('fresh'), 60);
+  global.succeeded('x');
+  assert.equal(global.wait('x'), 60);
+  clock += 30_000;
+  assert.equal(global.wait('fresh'), 30);
+  clock += 30_000;
+  assert.equal(global.wait('fresh'), 0);
+
+  const capped = createLoginThrottle({ maxPending: 2 });
+  const first = capped.begin('p');
+  capped.begin('q');
+  assert.equal(capped.wait('r'), 1);
+  first();
+  assert.equal(capped.wait('r'), 0);
+  // Eine nie abgemeldete Prüfung verfällt und sperrt nicht dauerhaft
+  capped.begin('r');
+  assert.equal(capped.wait('s'), 1);
+  clock += 2 * 60_000 + 1;
+  assert.equal(capped.wait('s'), 0);
 });
 
 test('expired and cancelled enrollment cannot enable 2FA; repeated bad codes also invalidate it', async () => {
