@@ -6,7 +6,9 @@ import { executionHeatmap, executionLevel, type ExecutionMetric } from '../../ex
 import { DAY_MS, HEATMAP_PERIODS, isHeatmapPeriod, type HeatmapPeriod } from '../../heatmap.ts';
 import { intlLocale, t, type MessageKey } from '../../i18n.tsx';
 import { cx, formatNumber, timeAgo } from '../../util.ts';
-import { Button, Card, ErrorBox, Spinner } from '../ui.tsx';
+import { Button, Card, ErrorBox, Field, Spinner } from '../ui.tsx';
+
+import { WidgetHeader, type WidgetControls } from './WidgetHeader.tsx';
 
 const STORAGE_KEY = 'fv:execution-history';
 interface Preferences { period: HeatmapPeriod; metric: ExecutionMetric; instance: string }
@@ -23,7 +25,7 @@ function storedPreferences(): Preferences {
   } catch { return defaults; }
 }
 
-const selectClass = 'h-8 min-w-0 max-w-full rounded-lg border border-line-2 bg-sidebar px-2 text-xs text-text outline-none focus:border-accent';
+const selectClass = 'h-9 w-full min-w-0 max-w-full rounded-lg border border-line-2 bg-sidebar px-2 text-xs text-text outline-none focus:border-accent';
 const colors = ['bg-emerald-500', 'bg-yellow-400', 'bg-amber-500', 'bg-orange-500', 'bg-red-500'];
 const date = (value: number) => new Date(value).toLocaleDateString(intlLocale(), { timeZone: 'UTC' });
 function rate(value: number | null) {
@@ -35,7 +37,7 @@ function rate(value: number | null) {
 const periodLabel = (p: HeatmapPeriod) => p === 'auto' ? t('dashboard.heatmap.auto') : p === '4w'
   ? t('dashboard.heatmap.weeks') : t('dashboard.heatmap.months', { count: Number.parseInt(p) });
 
-export function ExecutionHistoryWidget({ instances }: { instances: Instance[] }) {
+export function ExecutionHistoryWidget({ instances, ...controls }: WidgetControls & { instances: Instance[] }) {
   const [preferences, setPreferences] = useState(storedPreferences);
   const selected = instances.some((i) => String(i.id) === preferences.instance) ? preferences.instance : 'all';
   function change(next: Partial<Preferences>) {
@@ -44,24 +46,32 @@ export function ExecutionHistoryWidget({ instances }: { instances: Instance[] })
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch {}
   }
   return <Card className="p-5">
-    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-      <h2 className="text-sm font-medium">{t('dashboard.executions.title')}</h2>
-      <div className="flex max-w-full flex-wrap gap-2">
+    <WidgetHeader id="executions" {...controls} className="mb-4" settings={<>
+      <Field label={t('dashboard.executions.instance')}>
         <select className={selectClass} aria-label={t('dashboard.executions.instance')} value={selected} onChange={(e) => change({ instance: e.target.value })}>
           <option value="all">{t('dashboard.executions.allInstances')}</option>
           {instances.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
         </select>
+      </Field>
+      <Field label={t('dashboard.executions.period')}>
         <select className={selectClass} aria-label={t('dashboard.executions.period')} value={preferences.period} onChange={(e) => {
           if (isHeatmapPeriod(e.target.value)) change({ period: e.target.value });
         }}>
           {HEATMAP_PERIODS.map((p) => <option key={p} value={p}>{periodLabel(p)}</option>)}
         </select>
+      </Field>
+      <Field label={t('dashboard.executions.metric')}>
         <select className={selectClass} aria-label={t('dashboard.executions.metric')} value={preferences.metric} onChange={(e) => change({ metric: e.target.value === 'count' ? 'count' : 'rate' })}>
           <option value="rate">{t('dashboard.executions.rate')}</option>
           <option value="count">{t('dashboard.executions.count')}</option>
         </select>
-      </div>
-    </div>
+      </Field>
+    </>}>
+      <p className="mt-1 text-xs text-dim">
+        {selected === 'all' ? t('dashboard.executions.allInstances') : instances.find((i) => String(i.id) === selected)?.name}
+        {' · '}{t(preferences.metric === 'rate' ? 'dashboard.executions.rate' : 'dashboard.executions.count')}
+      </p>
+    </WidgetHeader>
     {/* Remount on scope changes: never label stale results from another instance as current. */}
     <HistoryData key={selected} selected={selected} instances={instances} period={preferences.period} metric={preferences.metric} />
   </Card>;

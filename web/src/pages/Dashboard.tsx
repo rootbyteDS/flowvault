@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { LayoutDashboard, Plus, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
-import { defaultDashboardLayout, type DashboardLayout } from '../../../shared/dashboard.ts';
+import { defaultDashboardLayout, type DashboardLayout, type WidgetId } from '../../../shared/dashboard.ts';
 import { api, useApi, type Instance, type Overview } from '../api.ts';
 import { CustomizeDashboard } from '../components/dashboard/CustomizeDashboard.tsx';
 import { DASHBOARD_WIDGETS, type WidgetSection } from '../components/dashboard/widgets.tsx';
@@ -9,6 +9,7 @@ import { InstanceForm } from '../components/InstanceForm.tsx';
 import { Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, useToast } from '../components/ui.tsx';
 import { cx, timeAgo } from '../util.ts';
 import { t } from '../i18n.tsx';
+import { WIDGET_TITLES } from '../widget-titles.ts';
 
 export function Dashboard() {
   const toast = useToast();
@@ -16,9 +17,27 @@ export function Dashboard() {
   const [showForm, setShowForm] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [customizing, setCustomizing] = useState(false);
+  const [hiding, setHiding] = useState(false);
+  const hideInFlight = useRef(false);
   const layout = useApi<DashboardLayout>('/dashboard/layout');
   const instances = useApi<Instance[]>('/instances', { poll: (d) => (d.some((i) => i.syncing) ? 2000 : false) });
   const overview = useApi<Overview>('/overview', { poll: () => (instances.data?.some((i) => i.syncing) ? 2500 : 30000) });
+
+  async function hideWidget(id: WidgetId) {
+    if (!layout.data || hideInFlight.current) return;
+    hideInFlight.current = true;
+    setHiding(true);
+    try {
+      const saved = await api<DashboardLayout>(`/dashboard/layout/widgets/${id}`, { method: 'PATCH', body: { visible: false } });
+      layout.setData(saved);
+      toast(t('dashboard.widget.hidden', { name: t(WIDGET_TITLES[id]) }));
+    } catch (error) {
+      toast((error as Error).message, 'error');
+    } finally {
+      hideInFlight.current = false;
+      setHiding(false);
+    }
+  }
 
   async function syncAll() {
     setSyncing(true);
@@ -59,11 +78,12 @@ export function Dashboard() {
   const settings = layout.data ?? defaultDashboardLayout();
   const visible = DASHBOARD_WIDGETS.filter((widget) => settings.widgets[widget.id].visible);
   const section = (name: WidgetSection) => visible.filter((widget) => widget.section === name);
-  const renderSection = (name: WidgetSection) => section(name).map(({ id, Component }) => <Component key={id} overview={o} instances={list} />);
+  const renderSection = (name: WidgetSection) => section(name).map(({ id, Component }) => <Component key={id} overview={o} instances={list}
+    onHide={() => void hideWidget(id)} hideDisabled={!layout.data || hiding || customizing} />);
   const metricCount = section('metrics').length;
   const hasMain = section('main').length > 0;
   const hasSide = section('side').length > 0;
-  const customizeButton = <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setCustomizing(true)} disabled={!layout.data}>{t('dashboard.customize.title')}</Button>;
+  const customizeButton = <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setCustomizing(true)} disabled={!layout.data || hiding}>{t('dashboard.customize.title')}</Button>;
 
   return (
     <>

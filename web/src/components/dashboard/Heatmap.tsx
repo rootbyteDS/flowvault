@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import type { Overview } from '../../api.ts';
-import { Card } from '../ui.tsx';
+import { Card, Field } from '../ui.tsx';
 import { cx } from '../../util.ts';
 import { intlLocale, t } from '../../i18n.tsx';
 import { DAY_MS, HEATMAP_PERIODS, heatmapData, isHeatmapPeriod, type HeatmapPeriod } from '../../heatmap.ts';
+
+import { WidgetHeader, type WidgetControls } from './WidgetHeader.tsx';
 
 const monthName = (month: number) => new Date(Date.UTC(2000, month, 1)).toLocaleDateString(intlLocale(), { month: 'short', timeZone: 'UTC' });
 
@@ -17,7 +19,7 @@ function storedPeriod(): HeatmapPeriod {
   return 'auto';
 }
 
-export function Heatmap({ days, firstBackup }: { days: Overview['days']; firstBackup: number | null }) {
+export function Heatmap({ days, firstBackup, ...controls }: WidgetControls & { days: Overview['days']; firstBackup: number | null }) {
   const [choice, setChoice] = useState(storedPeriod);
   const today = Math.floor(Date.now() / DAY_MS);
   const { period, grid, weeks, total, max } = heatmapData(days, firstBackup, choice, today);
@@ -41,25 +43,18 @@ export function Heatmap({ days, firstBackup }: { days: Overview['days']; firstBa
 
   return (
     <Card className="p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-medium">{t('dashboard.heatmap.title', { period: periodLabel(period) })}</h2>
-          {firstBackup !== null && (
-            <p className="mt-1 text-xs text-dim">{t('dashboard.heatmap.since', { date: new Date(firstBackup).toLocaleDateString(intlLocale(), { timeZone: 'UTC' }) })}</p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="font-mono text-xs text-dim">{t('dashboard.heatmap.versions', { count: total })}</span>
-          <select
-            aria-label={t('dashboard.heatmap.period')}
-            value={choice}
-            onChange={(e) => changePeriod(e.target.value)}
-            className="h-8 rounded-lg border border-line-2 bg-sidebar px-2 text-xs text-text outline-none focus:border-accent"
-          >
+      <WidgetHeader id="history" {...controls} className="mb-4"
+        aside={<span className="mr-2 font-mono text-xs text-dim">{t('dashboard.heatmap.versions', { count: total })}</span>}
+        settings={<Field label={t('dashboard.heatmap.period')}>
+          <select aria-label={t('dashboard.heatmap.period')} value={choice} onChange={(e) => changePeriod(e.target.value)}
+            className="h-9 w-full rounded-lg border border-line-2 bg-sidebar px-2 text-sm text-text outline-none focus:border-accent">
             {HEATMAP_PERIODS.map((p) => <option key={p} value={p}>{periodLabel(p)}</option>)}
           </select>
-        </div>
-      </div>
+        </Field>}
+      >
+        <p className="mt-1 text-xs text-dim">{t('dashboard.heatmap.title', { period: periodLabel(period) })}</p>
+        {firstBackup !== null && <p className="mt-1 text-xs text-dim">{t('dashboard.heatmap.since', { date: new Date(firstBackup).toLocaleDateString(intlLocale(), { timeZone: 'UTC' }) })}</p>}
+      </WidgetHeader>
       {firstBackup === null ? (
         <p className="py-8 text-center text-sm text-muted">{t('dashboard.heatmap.empty')}</p>
       ) : (

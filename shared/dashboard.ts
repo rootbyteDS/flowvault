@@ -1,6 +1,7 @@
 /** Stable widget IDs are independent of translated titles and React components. */
 export const WIDGET_IDS = ['health', 'instanceCount', 'workflowCount', 'versionCount', 'storage', 'history', 'executions', 'activity', 'instances'] as const;
 export type WidgetId = typeof WIDGET_IDS[number];
+export const isWidgetId = (id: unknown): id is WidgetId => WIDGET_IDS.some((known) => known === id);
 export interface DashboardLayout {
   version: 1;
   widgets: Record<WidgetId, { visible: boolean }>;

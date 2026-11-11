@@ -85,6 +85,7 @@ class Browser {
   }
   login() { return this.request('/auth/login', { email, password }); }
   put(route: string, body: unknown) { return this.request(route, body, this.ip, 'PUT'); }
+  patch(route: string, body: unknown) { return this.request(route, body, this.ip, 'PATCH'); }
 }
 
 async function configured() {
@@ -509,5 +510,40 @@ test('old and corrupt saved dashboard layouts get safe defaults for new widgets'
   for (const corrupt of ['not json', 'null', '{"version":2,"widgets":{}}']) {
     setSetting('admin_dashboard_layout', corrupt);
     assert.deepEqual((await browser.request('/dashboard/layout')).body, defaultDashboardLayout());
+  }
+});
+
+test('direct widget hiding persists across devices without replacing other widget choices', async () => {
+  const path = '/dashboard/layout/widgets/history';
+  assert.equal((await new Browser().patch(path, { visible: false })).status, 401);
+  const browser = await configured();
+  const other = new Browser();
+  await other.login();
+  const first = await browser.patch(path, { visible: false });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.widgets.history.visible, false);
+  const second = await other.patch('/dashboard/layout/widgets/instances', { visible: false });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.widgets.history.visible, false);
+  assert.equal(second.body.widgets.instances.visible, false);
+  assert.equal(second.body.widgets.executions.visible, true);
+  const restored = await browser.patch(path, { visible: true });
+  assert.equal(restored.body.widgets.history.visible, true);
+  assert.equal(restored.body.widgets.instances.visible, false);
+  assert.deepEqual((await other.request('/dashboard/layout')).body, restored.body);
+  assert.deepEqual(JSON.parse(getSetting('admin_dashboard_layout')!), restored.body);
+});
+
+test('invalid widget visibility changes cannot overwrite saved preferences', async () => {
+  const browser = await configured();
+  await browser.patch('/dashboard/layout/widgets/executions', { visible: false });
+  const before = (await browser.request('/dashboard/layout')).body;
+  for (const invalid of [null, [], {}, { visible: 'false' }, { visible: 0 }, { visible: true, extra: 'ignored?' }]) {
+    assert.equal((await browser.patch('/dashboard/layout/widgets/executions', invalid)).status, 400);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
+  }
+  for (const unknown of ['unknown', '__proto__', 'constructor']) {
+    assert.equal((await browser.patch(`/dashboard/layout/widgets/${unknown}`, { visible: false })).status, 400);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
   }
 });

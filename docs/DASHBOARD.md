@@ -5,6 +5,22 @@ der Ausführungsverlauf, die letzten Änderungen, die Instanzenübersicht sowie 
 ein- und ausblenden. Die Auswahl wird erst mit **Speichern** übernommen.
 **Standard wiederherstellen** setzt die Auswahl im Dialog zurück; anschließend speichern.
 
+Alle Widget-Kopfzeilen verwenden dieselben Namen wie die Auswahl unter
+**Dashboard anpassen**. Beispielsweise heißt die Instanzenliste überall
+**Instanzenübersicht**, während die Kennzahl **Instanzen** heißt.
+
+Das **X** in der Kopfzeile blendet das einzelne Widget sofort für das Admin-Konto
+aus. Erst wenn die Speicherung erfolgreich ist, verschwindet es. Bei einem Fehler
+bleibt es sichtbar und eine Fehlermeldung erscheint. Wieder einblenden lässt es sich
+über **Dashboard anpassen**, auch wenn bereits alle Widgets ausgeblendet sind.
+
+Bei **Änderungsverlauf** und **Ausführungsverlauf** öffnet das **Zahnrad** die
+Einstellungen direkt im Widget. Dort stehen Zeitraum sowie beim Ausführungsverlauf
+Instanz und Darstellungsart zur Verfügung. Die aktuelle Auswahl bleibt außerhalb
+des Einstellungsbereichs sichtbar. Änderungen wirken sofort und bleiben in diesem
+Browser gespeichert. Erneutes Klicken auf das Zahnrad oder Escape im Bereich
+schließt die Einstellungen. Widgets ohne eigene Einstellungen zeigen nur das X.
+
 Die Einstellungen liegen serverseitig in der bestehenden SQLite-Tabelle `settings`
 unter `admin_dashboard_layout`. FlowVault hat aktuell ein gemeinsames Admin-Konto;
 alle angemeldeten Geräte verwenden dessen Auswahl beim Öffnen des Dashboards.
@@ -17,7 +33,8 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
   und Validierung. Fehlende IDs in älteren Einstellungen bekommen die Vorgaben
   neuer Widgets. Beschädigte Einstellungen fallen auf die Standardansicht zurück.
 - `web/src/components/dashboard/widgets.tsx`: Widget-Komponenten und Registrierung
-  mit ID, übersetztem Titel und Layoutbereich. Deaktivierte Komponenten werden
+  mit ID und Layoutbereich. Die Titel in `web/src/widget-titles.ts` werden von
+  Kopfzeile und Sichtbarkeitsauswahl gemeinsam verwendet. Deaktivierte Komponenten werden
   nicht eingebunden; beispielsweise ruft ein ausgeblendetes Health-Widget seine
   Warnungen nicht mehr ab.
 - `web/src/components/dashboard/Heatmap.tsx`: Änderungsverlauf samt Zeitraumwahl.
@@ -25,8 +42,12 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
   Instanzfilter, Zeitraumwahl und Fehlerquote bzw. Fehleranzahl.
 - `web/src/components/dashboard/CustomizeDashboard.tsx`: Auswahl mit Entwurf,
   Speichern, Abbrechen und Zurücksetzen.
+- `web/src/components/dashboard/WidgetHeader.tsx`: gemeinsame Kopfzeile mit
+  Widget-Titel, Ausblenden und optionalem Einstellungsbereich.
 - `server/dashboard.ts`: `GET /api/dashboard/layout` und `PUT /api/dashboard/layout`,
-  hinter der bestehenden Anmeldung und dem JSON-/CSRF-Schutz des Cores.
+  sowie `PATCH /api/dashboard/layout/widgets/:id` für die Sichtbarkeit eines
+  einzelnen Widgets. Die Teilaktualisierung verändert die übrige gespeicherte
+  Auswahl nicht. Alle liegen hinter Anmeldung und JSON-/CSRF-Schutz des Cores.
 
 Für ein neues Widget eine ID mit Vorgabe ergänzen, die Komponente registrieren
 und die Texte in beiden Sprachkatalogen ergänzen. Das Dashboard ordnet die sichtbaren

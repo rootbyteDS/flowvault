@@ -9,57 +9,54 @@ import { AlertsCard } from '../health.tsx';
 import { Card, StatusDot } from '../ui.tsx';
 import { Heatmap } from './Heatmap.tsx';
 import { ExecutionHistoryWidget } from './ExecutionHistory.tsx';
+import { WidgetHeader, type WidgetControls } from './WidgetHeader.tsx';
 
-export interface WidgetProps { overview: Overview; instances: Instance[] }
+export interface WidgetProps extends WidgetControls { overview: Overview; instances: Instance[] }
 export type WidgetSection = 'status' | 'metrics' | 'main' | 'side';
 interface WidgetDefinition {
   id: WidgetId;
-  label: MessageKey;
   hint?: MessageKey;
   section: WidgetSection;
   Component: ComponentType<WidgetProps>;
 }
 
-function Stat({ label, value, sub }: { label: string; value: ReactNode; sub: ReactNode }) {
+function Stat({ id, value, sub, ...controls }: WidgetControls & { id: WidgetId; value: ReactNode; sub: ReactNode }) {
   return <Card className="px-5 py-4">
-    <div className="text-[13px] text-muted">{label}</div>
+    <WidgetHeader id={id} compact {...controls} />
     <div className="mt-2 text-[28px] leading-none font-medium [font-stretch:92%]">{value}</div>
     <div className="mt-2 text-xs text-dim">{sub}</div>
   </Card>;
 }
 
-function InstanceCount({ overview: o, instances }: WidgetProps) {
-  return <Stat label={t('dashboard.stats.instances')} value={o.stats.instances} sub={t('dashboard.stats.reachable', { reachable: instances.filter((i) => i.last_sync_ok).length, total: instances.length })} />;
+function InstanceCount({ overview: o, instances, ...controls }: WidgetProps) {
+  return <Stat id="instanceCount" {...controls} value={o.stats.instances} sub={t('dashboard.stats.reachable', { reachable: instances.filter((i) => i.last_sync_ok).length, total: instances.length })} />;
 }
-function WorkflowCount({ overview: o }: WidgetProps) {
-  return <Stat label={t('dashboard.stats.workflows')} value={o.stats.workflows} sub={t('dashboard.stats.active', { count: o.stats.active })} />;
+function WorkflowCount({ overview: o, ...controls }: WidgetProps) {
+  return <Stat id="workflowCount" {...controls} value={o.stats.workflows} sub={t('dashboard.stats.active', { count: o.stats.active })} />;
 }
-function VersionCount({ overview: o }: WidgetProps) {
-  return <Stat label={t('dashboard.stats.versions')} value={o.stats.versions} sub={t('dashboard.stats.versionsWeek', { count: o.stats.versions_7d })} />;
+function VersionCount({ overview: o, ...controls }: WidgetProps) {
+  return <Stat id="versionCount" {...controls} value={o.stats.versions} sub={t('dashboard.stats.versionsWeek', { count: o.stats.versions_7d })} />;
 }
-function Storage({ overview: o }: WidgetProps) {
-  return <Stat label={t('dashboard.stats.storage')} value={formatBytes(o.stats.storage_bytes)} sub={t('dashboard.stats.storageFor', { count: o.stats.versions })} />;
+function Storage({ overview: o, ...controls }: WidgetProps) {
+  return <Stat id="storage" {...controls} value={formatBytes(o.stats.storage_bytes)} sub={t('dashboard.stats.storageFor', { count: o.stats.versions })} />;
 }
-function History({ overview: o }: WidgetProps) {
-  return <Heatmap days={o.days} firstBackup={o.stats.first_backup} />;
+function History({ overview: o, ...controls }: WidgetProps) {
+  return <Heatmap days={o.days} firstBackup={o.stats.first_backup} {...controls} />;
 }
-function Activity({ overview: o }: WidgetProps) {
+function Activity({ overview: o, ...controls }: WidgetProps) {
   return <Card>
-    <div className="flex items-baseline justify-between border-b border-line px-4 py-3">
-      <h2 className="text-sm font-medium">{t('dashboard.recent')}</h2>
-      <Link to="/activity" className="text-[13px] text-muted transition-colors hover:text-text">{t('dashboard.showAll')}</Link>
-    </div>
+    <WidgetHeader id="activity" {...controls} className="border-b border-line px-4 py-3" aside={
+      <Link to="/activity" className="mr-2 text-[13px] text-muted transition-colors hover:text-text">{t('dashboard.showAll')}</Link>
+    } />
     <div className="divide-y divide-line">
       {o.activity.map((a) => <ActivityRow key={a.id} a={a} />)}
       {o.activity.length === 0 && <div className="px-4 py-12 text-center text-sm text-muted">{t('dashboard.noChanges')}</div>}
     </div>
   </Card>;
 }
-function Instances({ instances }: WidgetProps) {
+function Instances({ instances, ...controls }: WidgetProps) {
   return <Card>
-    <div className="border-b border-line px-4 py-3">
-      <h2 className="text-sm font-medium">{t('nav.instancesHeading')}</h2>
-    </div>
+    <WidgetHeader id="instances" {...controls} className="border-b border-line px-4 py-3" />
     <div className="divide-y divide-line">
       {instances.map((i) => (
         <Link key={i.id} to={`/instances/${i.id}`} className="block px-4 py-3 transition-colors hover:bg-panel-2">
@@ -85,13 +82,13 @@ function Instances({ instances }: WidgetProps) {
 
 /** Add new widgets here and their stable IDs/defaults in shared/dashboard.ts. */
 export const DASHBOARD_WIDGETS: readonly WidgetDefinition[] = [
-  { id: 'health', label: 'dashboard.customize.health', hint: 'dashboard.customize.healthHint', section: 'status', Component: AlertsCard },
-  { id: 'instanceCount', label: 'dashboard.customize.instanceCount', section: 'metrics', Component: InstanceCount },
-  { id: 'workflowCount', label: 'dashboard.customize.workflowCount', section: 'metrics', Component: WorkflowCount },
-  { id: 'versionCount', label: 'dashboard.customize.versionCount', section: 'metrics', Component: VersionCount },
-  { id: 'storage', label: 'dashboard.customize.storage', section: 'metrics', Component: Storage },
-  { id: 'history', label: 'dashboard.customize.history', section: 'main', Component: History },
-  { id: 'executions', label: 'dashboard.customize.executions', section: 'main', Component: ExecutionHistoryWidget },
-  { id: 'activity', label: 'dashboard.customize.activity', section: 'main', Component: Activity },
-  { id: 'instances', label: 'dashboard.customize.instances', section: 'side', Component: Instances },
+  { id: 'health', hint: 'dashboard.customize.healthHint', section: 'status', Component: AlertsCard },
+  { id: 'instanceCount', section: 'metrics', Component: InstanceCount },
+  { id: 'workflowCount', section: 'metrics', Component: WorkflowCount },
+  { id: 'versionCount', section: 'metrics', Component: VersionCount },
+  { id: 'storage', section: 'metrics', Component: Storage },
+  { id: 'history', section: 'main', Component: History },
+  { id: 'executions', section: 'main', Component: ExecutionHistoryWidget },
+  { id: 'activity', section: 'main', Component: Activity },
+  { id: 'instances', section: 'side', Component: Instances },
 ];

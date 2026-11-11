@@ -3,6 +3,7 @@ import { defaultDashboardLayout, type DashboardLayout } from '../../../../shared
 import { api } from '../../api.ts';
 import { t } from '../../i18n.tsx';
 import { Button, ErrorBox, Modal } from '../ui.tsx';
+import { WIDGET_TITLES } from '../../widget-titles.ts';
 import { DASHBOARD_WIDGETS } from './widgets.tsx';
 
 export function CustomizeDashboard({ layout, onClose, onSaved }: {
@@ -42,7 +43,7 @@ export function CustomizeDashboard({ layout, onClose, onSaved }: {
             onChange={(e) => setDraft({ ...draft, widgets: { ...draft.widgets, [widget.id]: { visible: e.target.checked } } })}
           />
           <span className="text-sm">
-            {t(widget.label)}
+            {t(WIDGET_TITLES[widget.id])}
             {widget.hint && <span className="mt-1 block text-xs text-dim">{t(widget.hint)}</span>}
           </span>
         </label>

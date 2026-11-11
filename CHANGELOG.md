@@ -8,6 +8,10 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 - Dashboard-Widget „Ausführungsverlauf“ mit Tageskacheln für Fehlerquote oder Fehleranzahl, Instanzfilter und automatisch mitwachsendem Zeitraum. Es nutzt die bereits gespeicherten Ausführungen, weist abgebrochene Läufe separat aus und zeigt Abrufprobleme, Datenalter sowie möglicherweise unvollständige Historie an.
 
+### Geändert
+
+- Einheitliche Widget-Namen auf dem Dashboard und in „Dashboard anpassen“. Die Einstellungen der Verlaufswidgets sind über ein Zahnrad direkt am Widget erreichbar; alle Widgets lassen sich über ein X ausblenden. Das direkte Ausblenden wird für das Admin-Konto gespeichert und erhält die übrige Widget-Auswahl.
+
 ## [0.3.0] – 2026-11-10
 
 Erstes veröffentlichtes Release. Die vorherigen Versionsnummern (0.1.0 bis 0.2.6) waren Entwicklungsstände ohne eigenes Release; ihre Änderungen sind hier zusammengefasst.

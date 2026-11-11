@@ -4,6 +4,7 @@
  * Grundsatz: Jeder Zustand erklärt sich selbst. Statt „–“ oder nichts steht da, warum
  * es (noch) keine Zahl gibt und was man tun kann.
  */
+import { WidgetHeader, type WidgetControls } from './dashboard/WidgetHeader.tsx';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Activity, AlertTriangle, ChevronDown, CircleCheck, EyeOff, GitBranch, Hourglass, Info, RotateCcw, Scale, Settings2, TrendingDown } from 'lucide-react';
@@ -364,7 +365,7 @@ export function AlertBanner({ alert, settings, onShow, onRollback, onDismissed }
 }
 
 /** Übersicht: alle offenen Warnungen. Ohne Auswertung oder ohne Warnungen unsichtbar. */
-export function AlertsCard() {
+export function AlertsCard(controls: WidgetControls) {
   const alerts = useApi<HealthAlert[]>('/health/alerts', { poll: () => 60_000 });
   const [rollback, setRollback] = useState<{ alert: HealthAlert } | null>(null);
   const toast = useToast();
@@ -373,16 +374,15 @@ export function AlertsCard() {
 
   return (
     <Card className="mb-6 border-del/30">
-      <div className="border-b border-line px-4 py-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-sm font-medium">
-            <AlertTriangle className="size-4 text-del" />
-            {t('health.alert.cardTitle', { count: list.length })}
-          </h2>
-          <Link to={SETTINGS_LINK} className="shrink-0 text-xs text-dim transition-colors hover:text-text">{t('health.alert.howDetected')}</Link>
-        </div>
+      <WidgetHeader id="health" {...controls} className="border-b border-line px-4 py-3" aside={
+        <Link to={SETTINGS_LINK} className="mr-2 text-xs text-dim transition-colors hover:text-text">{t('health.alert.howDetected')}</Link>
+      }>
+        <p className="mt-1 flex items-center gap-2 text-[13px] text-muted">
+          <AlertTriangle className="size-4 shrink-0 text-del" />
+          {t('health.alert.cardTitle', { count: list.length })}
+        </p>
         <p className="mt-1 text-[13px] text-muted">{t('health.alert.cardText')}</p>
-      </div>
+      </WidgetHeader>
       <div className="divide-y divide-line">
         {list.map((a) => (
           <div key={a.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
