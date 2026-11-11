@@ -18,6 +18,7 @@ export const db = new DatabaseSync(path.join(DATA_DIR, 'flowvault.db'));
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
+  PRAGMA secure_delete = ON;
 
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -77,7 +78,7 @@ db.exec(`
     workflow_id    INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
     number         INTEGER NOT NULL,
     hash           TEXT NOT NULL,
-    snapshot       BLOB NOT NULL,          -- gzip(JSON)
+    snapshot       BLOB NOT NULL,          -- AES-256-GCM(gzip(JSON)), Altbestand: gzip(JSON)
     summary        TEXT NOT NULL,          -- JSON ChangeSummary
     message        TEXT,                   -- optionale "Commit-Nachricht"
     n8n_version_id TEXT,

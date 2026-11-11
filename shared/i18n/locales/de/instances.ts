@@ -87,9 +87,9 @@ export const restore = {
   target: 'Ziel-Instanz',
   name: 'Name',
   noteMapped:
-    'Gespeicherte <b>Zuordnungen</b> (Umgebungen) werden angewandt – fehlende IDs bleiben unverändert und lassen sich unter <b>Umgebungen</b> pflegen.',
+    'Gespeicherte <b>Zuordnungen</b> aus <b>Umgebungen</b> werden angewandt. Fehlende Zuordnungen blockieren das Kopieren. Die passenden Credentials müssen auf der Ziel-Instanz vorhanden und nutzbar sein; ihre Zugangsdaten werden nicht mitgesichert oder übertragen.',
   noteCredentials:
-    'Credentials werden nur referenziert. Auf einer anderen Instanz müssen sie dort unter gleichem Namen existieren bzw. neu zugewiesen werden.',
+    'Die Credential-Verweise der gewählten Version werden übernommen. Verwendet werden deren heutige Zugangsdaten; frühere Passwörter oder Tokens werden nicht wiederhergestellt. Gelöschte oder unter neuer ID angelegte Credentials müssen in n8n neu zugewiesen werden. FlowVault prüft ihre Verfügbarkeit hier nicht.',
   noteInactive: 'Neu angelegte Workflows sind zunächst inaktiv.',
   overwritten: 'Version {number} wurde in n8n wiederhergestellt',
   copiedMapped: {

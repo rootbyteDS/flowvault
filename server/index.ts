@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db } from './db.ts';
 import { encrypt, decrypt } from './crypto.ts';
+import { migrateSnapshots } from './snapshot-migration.ts';
 import { N8nClient, normalizeBaseUrl } from './n8n.ts';
 import { announceSetupCode, requireAuth } from './auth.ts';
 import { createAuthRouter } from './auth-router.ts';
@@ -546,6 +547,9 @@ app.use((err: Error & { status?: number; type?: string }, req: Request, res: Res
   const tr = requestT(req);
   res.status(status).json({ error: expose ? renderError(err, tr) || tr('errors.http.generic') : tr('errors.http.internal') });
 });
+
+// Altbestand und Anwendungsschlüssel prüfen, bevor API, Scheduler oder Zusatzdienste starten.
+migrateSnapshots();
 
 app.listen(PORT, HOST, () => {
   console.log(`\n  ${t('log.listening', { url: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}` })}\n`);

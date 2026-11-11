@@ -1,6 +1,11 @@
 import type { Messages } from '../../types.ts';
 
 export const errors: Messages['errors'] = {
+  storage: {
+    keyUnavailable: 'The application key does not match the stored data. Restore the original APP_SECRET or secret.key together with the database; do not generate a new key. FlowVault was not started.',
+    snapshotUnreadable: 'Workflow version {id} cannot be read. Check the database and original application key. The snapshot migration was rolled back; FlowVault was not started.',
+    cleanupFailed: 'Snapshot database cleanup is not complete. Check free disk space and other database connections, then restart FlowVault; cleanup will be retried.',
+  },
   http: {
     generic: 'Error',
     status: 'Error {status}',
@@ -114,6 +119,7 @@ export const errors: Messages['errors'] = {
 };
 
 export const log: Messages['log'] = {
+  encryptingSnapshots: 'Encrypting workflow snapshots and cleaning up old database remnants. The first startup may take longer.',
   listening: 'FlowVault is running at {url}',
   setupCode: 'Setup code for the admin account: {code}',
   proxyWarning:

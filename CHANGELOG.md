@@ -10,7 +10,15 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 ### Geändert
 
+- Der Wiederherstellungsdialog erklärt, dass die Credential-Verweise der gewählten Version mit den heutigen Zugangsdaten verwendet werden und gelöschte oder neu angelegte Credentials in n8n neu zugewiesen werden müssen. Beim Kopieren zwischen Instanzen weist er auf die erforderlichen Zuordnungen und vorhandenen Ziel-Credentials hin.
+
+- Die Prozentgrenzen der Farbstufen im Ausführungsverlauf lassen sich über das Zahnrad einstellen, werden im Browser gespeichert und direkt in Kacheln und Legende übernommen. Ungültige Grenzen werden nicht angewendet; ein Zurücksetzen auf 1 / 5 / 20 % ist möglich.
+
 - Einheitliche Widget-Namen auf dem Dashboard und in „Dashboard anpassen“. Die Einstellungen der Verlaufswidgets sind über ein Zahnrad direkt am Widget erreichbar; alle Widgets lassen sich über ein X ausblenden. Das direkte Ausblenden wird für das Admin-Konto gespeichert und erhält die übrige Widget-Auswahl.
+
+### Sicherheit
+
+- Workflow-Snapshots werden vollständig mit AES-256-GCM verschlüsselt gespeichert, einschließlich direkt eingetragener Secrets, Pin-Data und `staticData`. Bestehende Versionen werden vor dem ersten Serverstart transaktional verschlüsselt; anschließend werden alte Inhalte aus freien Datenbankseiten und dem SQLite-WAL bereinigt. Ein falscher Anwendungsschlüssel oder eine unvollständige Migration/Bereinigung verhindert den Start. **Vor dem Update Datenbank und bisherigen Schlüssel sichern und ausreichend freien Speicher einplanen.** Ohne ursprünglichen `APP_SECRET` bzw. `secret.key` ist die verschlüsselte Historie nicht lesbar oder wiederherstellbar; ältere Programmversionen können sie ebenfalls nicht lesen. Frühere Backups und JSON-Exporte bleiben unverändert und müssen separat geschützt werden.
 
 ## [0.3.0] – 2026-11-10
 

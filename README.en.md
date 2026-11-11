@@ -26,7 +26,7 @@ Connect as many n8n instances as you like. FlowVault backs up all workflows auto
 - **Customisable dashboard**: show or hide key figures, change history, recent changes, the instance overview and health warnings individually ([details](docs/DASHBOARD.md), German)
 - Activity feed and heatmap, sync log per instance
 - **English and German**: interface, error messages and AI texts; more languages can be added without code changes (see [Languages](#languages))
-- API keys encrypted with AES-256-GCM, sign-in with email and password, optional 2FA with an authenticator app and one-time recovery codes (see [Security](#security))
+- API keys and workflow snapshots encrypted with AES-256-GCM, sign-in with email and password, optional 2FA with an authenticator app and one-time recovery codes (see [Security](#security))
 - **AI change texts (optional)** via [Melious](https://melious.ai): a model on EU infrastructure writes a commit-style title plus bullet points for every new version. Credentials are filtered out beforehand (see [AI change texts](#ai-change-texts-optional))
 
 Only real changes create versions – runtime data such as `staticData` (e.g. polling timestamps) is ignored.
@@ -92,7 +92,7 @@ docker compose up -d
 | `PORT`           | `4000`       | HTTP port |
 | `HOST`           | `127.0.0.1`  | Bind address (`0.0.0.0` in the container) |
 | `DATA_DIR`       | `./data`     | Location for the database and keys |
-| `APP_SECRET`     | –            | Key for encrypting the API keys. Without it, one is created automatically in `data/secret.key` |
+| `APP_SECRET`     | –            | Application key for API keys, 2FA and workflow snapshots. Without it, one is created automatically in `data/secret.key` during setup. Do not change or lose it. |
 | `ADMIN_PASSWORD` | –            | Fixed admin password instead of setting it up in the browser |
 | `ADMIN_EMAIL`    | –            | Fixed admin email; together with `ADMIN_PASSWORD` usable without initial setup. Without this variable, the email is set in the browser |
 | `DEFAULT_LANGUAGE` | `de`       | `de` or `en`: language of the server logs and of the AI change texts, and fallback language of the interface (see [Languages](#languages)) |
@@ -109,7 +109,9 @@ FlowVault starts the health service itself as a child process and restarts it af
 
 ## Backing up FlowVault itself
 
-Back up `flowvault.db` (SQLite, all versions gzip-compressed) from `DATA_DIR` and the key in use: either `secret.key` from the same directory or the value of `APP_SECRET` from your operating configuration. **Back up the database and the key together** – without the key, the API keys have to be entered again and active 2FA can only be reset with recovery codes; the workflow versions stay readable. Keep the recovery codes safe as well.
+Back up `flowvault.db` (SQLite, workflow versions compressed and encrypted) from `DATA_DIR` and the key in use: either `secret.key` from the same directory or the value of `APP_SECRET` from your operating configuration. Stop FlowVault before copying the files and include `flowvault.db-wal`/`flowvault.db-shm` if present, or create a consistent SQLite backup. **Keep the database and its original key as a matching backup set**, preferably stored separately with their own access controls. Without the original key, encrypted workflow versions can no longer be read or restored; 2FA recovery codes do not replace this key. FlowVault refuses to start with a mismatched key.
+
+**Updating existing installations:** On the first startup, previously unencrypted snapshots are encrypted automatically in one transaction. Free database pages and the SQLite WAL are then cleaned up before the API and background services start. Create a consistent backup including the existing key before updating. Migration may extend the first startup and requires up to roughly twice the database size in additional free space for cleanup. On failure, FlowVault does not start; after fixing the cause, migration or cleanup is retried on the next startup. Downgrading to a version without snapshot encryption cannot read this history. Earlier backups and filesystem snapshots are not encrypted retroactively.
 
 For a simple file copy, stop FlowVault first (`docker compose stop flowvault` or stop the local server). Do not make an isolated copy of `flowvault.db` while it is running: SQLite additionally uses WAL files. Afterwards, start FlowVault again.
 
@@ -157,6 +159,10 @@ The webhook receives a JSON POST with `app`, the installed `version`, the known 
 
 An accepted request does **not** mean the update was installed successfully. Check the history in the deployment service and reload FlowVault afterwards; the displayed version and build information then show the running state.
 
+## Restoring and credentials
+
+For n8n credentials, FlowVault only saves references (type, ID and name), not the secret values themselves. Restoring on the same instance also applies the references from the selected version: if v1 uses credential A and v2 uses credential B, restoring v1 points back to A. The **current** secret values of A are used; earlier passwords or tokens are not restored. Credentials that were deleted or recreated with a new ID must be reassigned in n8n. Their availability is not checked when restoring on the same instance; the dialog explains this.
+
 ## Environments: staging → production
 
 In practice, copying between instances fails on IDs that are different everywhere: credentials (“Slack Staging” ↔ “Slack Prod”), sub-workflow IDs in Execute Workflow, error workflows in the settings, data table IDs, webhook paths. **Environments** supports this promotion through the n8n public API with its own mappings:
@@ -170,7 +176,7 @@ Existing target workflows are read from n8n and backed up before writing. Change
 
 New circular dependencies must first be created and mapped separately on the target. Dynamic workflow/data table references cannot be checked statically and block the reviewed promotion. Normal expressions in input fields stay unchanged. The replacement also handles n8n resource locators (`{ value, mode, __rl }`). Active status, tags and pin data are not part of the writable n8n workflow payload; activation happens separately in n8n.
 
-Copying from the version history to another instance also requires a configured pair and complete reference mappings. A copy does not replace an existing workflow pairing. Credentials stay encrypted: the target instance is only reached through its saved address and its own API key.
+Copying from the version history to another instance also requires a configured pair and complete reference mappings. A copy does not replace an existing workflow pairing. Matching credentials must exist and be usable on the target; matching names alone are not sufficient. Their secret values are not transferred. The target instance is only reached through its saved address and its own API key.
 
 ## Health service: failure rate per version
 
@@ -217,7 +223,7 @@ Anyone signed in to FlowVault can write workflows to all connected n8n instances
 - **Files** in `DATA_DIR` are readable only by the user FlowVault runs as.
 - **Fonts** are served locally; the browser loads nothing from third parties.
 
-Good to know: The snapshots also contain pin data (test data) and `staticData` of the workflows. They are stored compressed but not encrypted in the database – if test data contains personal data, protect the database accordingly.
+**Workflow snapshots** are compressed in full and stored encrypted with AES-256-GCM, including keys entered directly in nodes, pin data (test data) and `staticData`. Tampered encrypted content is rejected when read. Encryption protects stored snapshots if someone accesses the database without the application key. Workflow names, change summaries, notes and AI texts remain unencrypted; do not put secrets there. Signed-in users can view, copy, download and restore the decrypted contents; exported JSON files are not encrypted. Protect the database, key and exports accordingly. Inline secrets remain part of every affected version; use n8n credentials for secret values where possible. If a key has already been exposed, revoke or rotate it with the provider – encryption does not undo earlier exposure.
 
 Please report vulnerabilities confidentially according to [SECURITY.md](SECURITY.md), not as a public issue.
 

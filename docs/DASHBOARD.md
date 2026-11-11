@@ -76,7 +76,21 @@ die Fehlerquote ist `Fehler / (success + error + crashed)`. Abgebrochene Läufe
 (`canceled`) werden separat gezählt, laufende oder wartende Läufe nicht ausgewertet.
 Manuelle Testläufe folgen der bestehenden Health-Einstellung.
 
-Die Farbstufen sind fest und ändern sich nicht mit dem gewählten Zeitraum:
+Die Farbstufen ändern sich nicht mit dem gewählten Zeitraum. Im Zahnrad des
+Ausführungsverlaufs lassen sich für **Fehlerquote** die oberen Grenzen für Gelb,
+Amber und Orange einstellen. Die Werte sind inklusive; Rot beginnt oberhalb der
+Orange-Grenze. Grün bleibt 0 % Fehler bei vorhandenen ausgewerteten Läufen.
+
+Gültig sind drei streng aufsteigende Prozentwerte zwischen 0,01 und 99,99 mit
+höchstens zwei Nachkommastellen. Nur gültige Eingaben werden sofort angewendet
+und mit den anderen Widget-Einstellungen in diesem Browser gespeichert. Bei
+leeren oder ungültigen Eingaben erscheint ein Hinweis; Kacheln und Legende behalten
+die zuletzt gültigen Grenzen. Beim Schließen werden ungültige Entwürfe verworfen.
+**Farbgrenzen zurücksetzen** stellt die Standardwerte 1 / 5 / 20 % wieder her.
+Vorhandene ältere Widget-Einstellungen bekommen diese Standardwerte automatisch.
+Die Grenzen ändern nur die Darstellung, nicht die Health-Warnregeln.
+
+Die **Fehleranzahl** behält ihre festen Zählergrenzen. Standardwerte:
 
 | Stufe | Fehlerquote | Fehleranzahl |
 | --- | --- | --- |

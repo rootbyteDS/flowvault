@@ -11,7 +11,7 @@ services:
       # freigeben – nicht "4000:4000" eintragen: Docker umgeht dabei auch die Firewall (ufw).
       - "127.0.0.1:4000:4000"
     environment:
-      # Langer, zufälliger Wert – verschlüsselt die n8n-API-Keys. NICHT verlieren!
+      # Langer, zufälliger Wert – schützt API-Keys, 2FA und Workflow-Snapshots. NICHT verlieren!
       APP_SECRET: ${APP_SECRET:?Bitte APP_SECRET in .env setzen}
       # Optional: feste Admin-Zugangsdaten. Leer = beim ersten Aufruf festlegen – mit dem
       # Einrichtungscode aus `docker compose logs flowvault`.

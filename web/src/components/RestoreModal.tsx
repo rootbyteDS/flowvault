@@ -106,8 +106,8 @@ export function RestoreModal({ open, onClose, versionId, versionNumber, workflow
           <span>
             {mode === 'copy' && target !== instanceId
               ? rich('restore.noteMapped', { b: (c) => <b className="text-text">{c}</b> })
-              : t('restore.noteCredentials')}{' '}
-            {t('restore.noteInactive')}
+              : t('restore.noteCredentials')}
+            {mode === 'copy' && <> {t('restore.noteInactive')}</>}
           </span>
         </div>
         {error && <ErrorBox>{error}</ErrorBox>}

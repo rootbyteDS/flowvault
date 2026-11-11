@@ -2,27 +2,19 @@ import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router';
 import type { ExecutionHistory as History } from '../../../../shared/executions.ts';
 import { useApi, type Instance } from '../../api.ts';
-import { executionHeatmap, executionLevel, type ExecutionMetric } from '../../execution-history.ts';
+import { executionHeatmap, executionLevel, normalizeExecutionPreferences, type ExecutionMetric, type ExecutionPreferences, type RateThresholds } from '../../execution-history.ts';
 import { DAY_MS, HEATMAP_PERIODS, isHeatmapPeriod, type HeatmapPeriod } from '../../heatmap.ts';
 import { intlLocale, t, type MessageKey } from '../../i18n.tsx';
 import { cx, formatNumber, timeAgo } from '../../util.ts';
 import { Button, Card, ErrorBox, Field, Spinner } from '../ui.tsx';
 
 import { WidgetHeader, type WidgetControls } from './WidgetHeader.tsx';
+import { RateColorSettings } from './RateColorSettings.tsx';
 
 const STORAGE_KEY = 'fv:execution-history';
-interface Preferences { period: HeatmapPeriod; metric: ExecutionMetric; instance: string }
-function storedPreferences(): Preferences {
-  const defaults: Preferences = { period: 'auto', metric: 'rate', instance: 'all' };
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
-    if (!stored || typeof stored !== 'object') return defaults;
-    return {
-      period: isHeatmapPeriod(stored.period) ? stored.period : defaults.period,
-      metric: stored.metric === 'count' ? 'count' : 'rate',
-      instance: typeof stored.instance === 'string' && /^[1-9]\d*$/.test(stored.instance) ? stored.instance : 'all',
-    };
-  } catch { return defaults; }
+function storedPreferences(): ExecutionPreferences {
+  try { return normalizeExecutionPreferences(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')); }
+  catch { return normalizeExecutionPreferences(null); }
 }
 
 const selectClass = 'h-9 w-full min-w-0 max-w-full rounded-lg border border-line-2 bg-sidebar px-2 text-xs text-text outline-none focus:border-accent';
@@ -34,13 +26,17 @@ function rate(value: number | null) {
   const tiny = value > 0 && value < 0.001;
   return `${tiny ? '<' : ''}${formatNumber(tiny ? 0.001 : value, { style: 'percent', maximumFractionDigits: 1 })}`;
 }
+function rateLegend(thresholds: RateThresholds) {
+  const percent = (value: number) => formatNumber(value / 100, { style: 'percent', maximumFractionDigits: 2 });
+  return [percent(0), ...thresholds.map((limit, i) => `>${formatNumber(i === 0 ? 0 : thresholds[i - 1], { maximumFractionDigits: 2 })}–${percent(limit)}`), `>${percent(thresholds[2])}`];
+}
 const periodLabel = (p: HeatmapPeriod) => p === 'auto' ? t('dashboard.heatmap.auto') : p === '4w'
   ? t('dashboard.heatmap.weeks') : t('dashboard.heatmap.months', { count: Number.parseInt(p) });
 
 export function ExecutionHistoryWidget({ instances, ...controls }: WidgetControls & { instances: Instance[] }) {
   const [preferences, setPreferences] = useState(storedPreferences);
   const selected = instances.some((i) => String(i.id) === preferences.instance) ? preferences.instance : 'all';
-  function change(next: Partial<Preferences>) {
+  function change(next: Partial<ExecutionPreferences>) {
     const value = { ...preferences, instance: selected, ...next };
     setPreferences(value);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch {}
@@ -66,6 +62,9 @@ export function ExecutionHistoryWidget({ instances, ...controls }: WidgetControl
           <option value="count">{t('dashboard.executions.count')}</option>
         </select>
       </Field>
+      {preferences.metric === 'rate'
+        ? <RateColorSettings thresholds={preferences.rateThresholds} onChange={(rateThresholds) => change({ rateThresholds })} />
+        : <p className="text-xs text-dim">{t('dashboard.executions.countLimitsHint')}</p>}
     </>}>
       <p className="mt-1 text-xs text-dim">
         {selected === 'all' ? t('dashboard.executions.allInstances') : instances.find((i) => String(i.id) === selected)?.name}
@@ -73,11 +72,11 @@ export function ExecutionHistoryWidget({ instances, ...controls }: WidgetControl
       </p>
     </WidgetHeader>
     {/* Remount on scope changes: never label stale results from another instance as current. */}
-    <HistoryData key={selected} selected={selected} instances={instances} period={preferences.period} metric={preferences.metric} />
+    <HistoryData key={selected} selected={selected} instances={instances} period={preferences.period} metric={preferences.metric} thresholds={preferences.rateThresholds} />
   </Card>;
 }
 
-function HistoryData({ selected, instances, period, metric }: { selected: string; instances: Instance[]; period: HeatmapPeriod; metric: ExecutionMetric }) {
+function HistoryData({ selected, instances, period, metric, thresholds }: { selected: string; instances: Instance[]; period: HeatmapPeriod; metric: ExecutionMetric; thresholds: RateThresholds }) {
   const result = useApi<History>(`/health/executions/history${selected === 'all' ? '' : `?instance=${selected}`}`, {
     poll: (d) => d.settings.enabled ? Math.max(30_000, d.settings.pollMinutes * 60_000) : 60_000,
   });
@@ -149,7 +148,7 @@ function HistoryData({ selected, instances, period, metric }: { selected: string
           </div>)}
           {chart.grid.map((col, w) => <div key={w} className="grid gap-[3px]">
             {col.map((c) => {
-              const level = executionLevel(c, metric);
+              const level = executionLevel(c, metric, thresholds);
               const description = c.outside ? undefined : cellDescription(c);
               return <div key={c.day} id={`${id}-${c.day}`} ref={(el) => { if (el) cells.current.set(c.day, el); else cells.current.delete(c.day); }}
                 role={c.outside ? undefined : 'img'} aria-label={description} title={description}
@@ -168,7 +167,7 @@ function HistoryData({ selected, instances, period, metric }: { selected: string
     </>}
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-dim" aria-label={t(metric === 'rate' ? 'dashboard.executions.rate' : 'dashboard.executions.count')}>
       <span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-[2px] border border-line-2 bg-panel-3" />{t('dashboard.executions.neutral')}</span>
-      {(metric === 'rate' ? ['0 %', '>0–1 %', '>1–5 %', '>5–20 %', '>20 %'] : ['0', '1–5', '6–20', '21–100', '>100']).map((label, i) => (
+      {(metric === 'rate' ? rateLegend(thresholds) : ['0', '1–5', '6–20', '21–100', '>100']).map((label, i) => (
         <span key={label} className="inline-flex items-center gap-1"><span className={cx('size-2.5 rounded-[2px]', colors[i])} />{label}</span>
       ))}
     </div>

@@ -1,5 +1,10 @@
 /** Fehlermeldungen von Server und Oberfläche sowie Meldungen, die der Server in Logs und Datenbank schreibt. */
 export const errors = {
+  storage: {
+    keyUnavailable: 'Der Anwendungsschlüssel passt nicht zu den gespeicherten Daten. Den ursprünglichen APP_SECRET bzw. die ursprüngliche secret.key zusammen mit der Datenbank wiederherstellen; keinen neuen Schlüssel erzeugen. FlowVault wurde nicht gestartet.',
+    snapshotUnreadable: 'Workflow-Version {id} kann nicht gelesen werden. Datenbank und ursprünglichen Anwendungsschlüssel prüfen. Die Snapshot-Migration wurde zurückgerollt; FlowVault wurde nicht gestartet.',
+    cleanupFailed: 'Die Bereinigung der Snapshot-Datenbank ist noch nicht abgeschlossen. Freien Speicherplatz und andere Datenbankverbindungen prüfen und FlowVault neu starten; die Bereinigung wird wiederholt.',
+  },
   http: {
     generic: 'Fehler',
     status: 'Fehler {status}',
@@ -114,6 +119,7 @@ export const errors = {
 
 /** Meldungen in Logs und in der Datenbank. */
 export const log = {
+  encryptingSnapshots: 'Workflow-Snapshots werden verschlüsselt und alte Datenbankreste bereinigt. Der erste Start kann länger dauern.',
   listening: 'FlowVault läuft auf {url}',
   setupCode: 'Einrichtungscode für das Admin-Konto: {code}',
   proxyWarning:

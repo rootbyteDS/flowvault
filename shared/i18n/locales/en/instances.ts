@@ -88,9 +88,9 @@ export const restore: Messages['restore'] = {
   target: 'Target instance',
   name: 'Name',
   noteMapped:
-    'Saved <b>mappings</b> (environments) are applied – missing IDs stay unchanged and can be maintained under <b>Environments</b>.',
+    'Saved <b>mappings</b> from <b>Environments</b> are applied. Missing mappings block copying. Matching credentials must exist and be usable on the target instance; their secret values are neither backed up nor transferred.',
   noteCredentials:
-    'Credentials are only referenced. On another instance, they must exist there under the same name or be reassigned.',
+    'The credential references from the selected version are applied. Their current secret values are used; earlier passwords or tokens are not restored. Credentials that were deleted or recreated with a new ID must be reassigned in n8n. FlowVault does not check their availability here.',
   noteInactive: 'Newly created workflows are inactive at first.',
   overwritten: 'Version {number} was restored in n8n',
   copiedMapped: {

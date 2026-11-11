@@ -24,7 +24,7 @@ Verbinde beliebig viele n8n-Instanzen. FlowVault sichert automatisch alle Workfl
 - **Anpassbares Dashboard**: Kennzahlen, Änderungsverlauf, letzte Änderungen, Instanzübersicht und Health-Warnungen einzeln ein- und ausblenden ([Details](docs/DASHBOARD.md))
 - Aktivitäts-Feed und Heatmap, Sync-Protokoll pro Instanz
 - **Deutsch und Englisch**: Oberfläche, Fehlermeldungen und KI-Texte; weitere Sprachen lassen sich ohne Codeänderung ergänzen (siehe [Sprachen](#sprachen))
-- API-Keys AES-256-GCM-verschlüsselt, Login mit E-Mail und Passwort, optionale 2FA per Authenticator-App mit einmaligen Wiederherstellungscodes (siehe [Sicherheit](#sicherheit))
+- API-Keys und Workflow-Snapshots AES-256-GCM-verschlüsselt, Login mit E-Mail und Passwort, optionale 2FA per Authenticator-App mit einmaligen Wiederherstellungscodes (siehe [Sicherheit](#sicherheit))
 - **KI-Änderungstexte (optional)** über [Melious](https://melious.ai): Ein Modell auf EU-Infrastruktur schreibt zu jeder neuen Version einen Titel im Commit-Stil plus Stichpunkte. Zugangsdaten werden vorher herausgefiltert (siehe [KI-Änderungstexte](#ki-änderungstexte-optional))
 
 Nur echte Änderungen erzeugen Versionen – Laufzeitdaten wie `staticData` (z. B. Polling-Zeitstempel) werden ignoriert.
@@ -90,7 +90,7 @@ docker compose up -d
 | `PORT`           | `4000`       | HTTP-Port |
 | `HOST`           | `127.0.0.1`  | Bind-Adresse (`0.0.0.0` im Container) |
 | `DATA_DIR`       | `./data`     | Speicherort für Datenbank & Schlüssel |
-| `APP_SECRET`     | –            | Schlüssel für die API-Key-Verschlüsselung. Ohne: wird automatisch in `data/secret.key` erzeugt |
+| `APP_SECRET`     | –            | Anwendungsschlüssel für API-Keys, 2FA und Workflow-Snapshots. Ohne: wird bei der Einrichtung automatisch in `data/secret.key` erzeugt. Nicht ändern oder verlieren. |
 | `ADMIN_PASSWORD` | –            | Festes Admin-Passwort statt Einrichtung im Browser |
 | `ADMIN_EMAIL`    | –            | Feste Admin-E-Mail; zusammen mit `ADMIN_PASSWORD` ohne Ersteinrichtung nutzbar. Ohne diese Variable wird die E-Mail im Browser hinterlegt |
 | `DEFAULT_LANGUAGE` | `de`       | `de` oder `en`: Sprache der Server-Logs und der KI-Änderungstexte sowie Ausweichsprache der Oberfläche (siehe [Sprachen](#sprachen)) |
@@ -107,7 +107,9 @@ FlowVault startet den Health-Dienst selbst als Kindprozess und startet ihn nach 
 
 ## Backup von FlowVault selbst
 
-Sichere `flowvault.db` (SQLite, alle Versionen gzip-komprimiert) aus `DATA_DIR` und den verwendeten Schlüssel: entweder `secret.key` aus demselben Verzeichnis oder den Wert von `APP_SECRET` aus deiner Betriebskonfiguration. **Datenbank und Schlüssel zusammen sichern** – ohne Schlüssel müssen die API-Keys neu eingetragen werden und aktive 2FA kann nur mit Wiederherstellungscodes zurückgesetzt werden; die Workflow-Versionen bleiben lesbar. Die Wiederherstellungscodes zusätzlich sicher aufbewahren.
+Sichere `flowvault.db` (SQLite, Workflow-Versionen komprimiert und verschlüsselt) aus `DATA_DIR` und den verwendeten Schlüssel: entweder `secret.key` aus demselben Verzeichnis oder den Wert von `APP_SECRET` aus deiner Betriebskonfiguration. FlowVault für eine Dateikopie vorher stoppen und gegebenenfalls vorhandene `flowvault.db-wal`/`flowvault.db-shm` mit sichern, oder eine konsistente SQLite-Sicherung erstellen. **Datenbank und ursprünglichen Schlüssel als zusammengehörige Sicherung aufbewahren**, möglichst getrennt und mit eigenen Zugriffsrechten. Ohne den ursprünglichen Schlüssel sind verschlüsselte Workflow-Versionen nicht mehr lesbar oder wiederherstellbar; Wiederherstellungscodes für 2FA ersetzen diesen Schlüssel nicht. Bei einem unpassenden Schlüssel bricht FlowVault den Start ab.
+
+**Update bestehender Installationen:** Beim ersten Start werden bisher unverschlüsselte Snapshots automatisch in einer Transaktion verschlüsselt. Anschließend werden freie Datenbankseiten und das SQLite-WAL bereinigt; erst danach starten API und Hintergrunddienste. Vor dem Update eine konsistente Sicherung einschließlich des bisherigen Schlüssels erstellen. Die Migration kann den ersten Start verlängern und benötigt für die Datenbankbereinigung bis etwa zur doppelten Datenbankgröße zusätzlichen freien Speicher. Bei einem Fehler startet FlowVault nicht; nach Beheben der Ursache wird die Migration bzw. Bereinigung beim nächsten Start wiederholt. Ein Downgrade auf Versionen ohne Snapshot-Verschlüsselung kann diese Historie nicht lesen. Frühere Backups und Dateisystem-Snapshots werden nicht nachträglich verschlüsselt.
 
 Für eine einfache Dateikopie FlowVault vorher stoppen (`docker compose stop flowvault` bzw. den lokalen Server beenden). Im laufenden Betrieb keine isolierte Kopie von `flowvault.db` anlegen: SQLite verwendet zusätzlich WAL-Dateien. Danach FlowVault wieder starten.
 
@@ -155,6 +157,10 @@ Der Webhook erhält einen JSON-POST mit `app`, installierter `version`, bekannte
 
 Eine angenommene Anfrage bedeutet **nicht**, dass das Update erfolgreich installiert wurde. Den Verlauf beim Deployment-Dienst prüfen und nach Abschluss FlowVault neu laden; die angezeigte Version und Build-Informationen zeigen dann den laufenden Stand.
 
+## Wiederherstellen und Credentials
+
+FlowVault sichert bei n8n-Credentials nur die Verweise (Typ, ID und Name), nicht die Zugangsdaten selbst. Auch innerhalb derselben Instanz werden beim Wiederherstellen die Verweise der gewählten Version übernommen: Nutzt v1 Credential A und v2 Credential B, verweist ein Restore von v1 wieder auf A. Verwendet werden dabei die **heutigen** Zugangsdaten von A; frühere Passwörter oder Tokens werden nicht zurückgesetzt. Gelöschte oder mit neuer ID angelegte Credentials müssen in n8n neu zugewiesen werden. Ihre Verfügbarkeit wird beim Wiederherstellen innerhalb derselben Instanz nicht geprüft; der Dialog weist darauf hin.
+
 ## Umgebungen: Staging → Produktion
 
 Kopieren zwischen Instanzen scheitert in der Praxis an IDs, die überall anders sind: Credentials („Slack Staging“ ↔ „Slack Prod“), Sub-Workflow-IDs in Execute Workflow, Error-Workflows in den Settings, Data-Table-IDs, Webhook-Pfade. **Umgebungen** unterstützt diese Übernahme über die n8n Public API mit eigenen Zuordnungen:
@@ -168,7 +174,7 @@ Bestehende Ziel-Workflows werden vor dem Schreiben aus n8n gelesen und gesichert
 
 Neue zyklische Abhängigkeiten müssen zunächst separat auf dem Ziel angelegt und zugeordnet werden. Dynamische Workflow-/Data-Table-Referenzen können nicht statisch geprüft werden und blockieren die geprüfte Übernahme. Normale Expressions in Eingabefeldern bleiben unverändert. Die Ersetzung berücksichtigt auch n8n Resource-Locators (`{ value, mode, __rl }`). Aktiv-Status, Tags und Pin-Daten sind nicht Teil der schreibbaren n8n-Workflow-Payload; Aktivierung erfolgt separat in n8n.
 
-Auch das Kopieren aus der Versionshistorie auf eine andere Instanz verlangt ein eingerichtetes Paar und vollständige Referenz-Zuordnungen. Eine Kopie ersetzt keine bestehende Workflow-Paarung. Zugangsdaten bleiben verschlüsselt: Die Ziel-Instanz wird nur über ihre gespeicherte Adresse und ihren eigenen API-Key erreicht.
+Auch das Kopieren aus der Versionshistorie auf eine andere Instanz verlangt ein eingerichtetes Paar und vollständige Referenz-Zuordnungen. Eine Kopie ersetzt keine bestehende Workflow-Paarung. Die passenden Credentials müssen auf dem Ziel vorhanden und nutzbar sein; gleiche Namen allein genügen nicht. Ihre Zugangsdaten werden nicht übertragen. Die Ziel-Instanz wird nur über ihre gespeicherte Adresse und ihren eigenen API-Key erreicht.
 
 ## Health-Dienst: Fehlerquote pro Version
 
@@ -215,7 +221,7 @@ Wer in FlowVault angemeldet ist, kann Workflows in alle verbundenen n8n-Instanze
 - **Dateien** in `DATA_DIR` sind nur für den Benutzer lesbar, unter dem FlowVault läuft.
 - **Schriften** werden lokal ausgeliefert, der Browser lädt nichts von Drittanbietern.
 
-Gut zu wissen: Die Snapshots enthalten auch Pin-Data (Testdaten) und `staticData` der Workflows. Sie liegen komprimiert, aber nicht verschlüsselt in der Datenbank – bei personenbezogenen Testdaten die Datenbank entsprechend schützen.
+**Workflow-Snapshots** werden vollständig komprimiert und mit AES-256-GCM verschlüsselt gespeichert, einschließlich direkt in Nodes eingetragener Schlüssel, Pin-Data (Testdaten) und `staticData`. Manipulierte verschlüsselte Inhalte werden beim Lesen abgelehnt. Die Verschlüsselung schützt die gespeicherten Snapshots bei Zugriff auf die Datenbank ohne Anwendungsschlüssel. Workflow-Namen, Änderungsübersichten, Notizen und KI-Texte bleiben unverschlüsselt; dort keine Secrets eintragen. Angemeldete Nutzer können die entschlüsselten Inhalte ansehen, kopieren, herunterladen und wiederherstellen; exportierte JSON-Dateien sind nicht verschlüsselt. Datenbank, Schlüssel und Exporte entsprechend absichern. Direkt eingetragene Secrets bleiben Bestandteil jeder betroffenen Version; Zugangsdaten gehören möglichst in n8n-Credentials. Bei einem bereits offengelegten Schlüssel diesen beim Anbieter widerrufen bzw. rotieren – Verschlüsselung macht eine frühere Offenlegung nicht rückgängig.
 
 Sicherheitslücken bitte vertraulich gemäß [SECURITY.md](SECURITY.md) melden, nicht als öffentliches Issue.
 
