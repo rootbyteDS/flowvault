@@ -59,20 +59,20 @@ async function scan(
 ) {
   let cursor: string | undefined;
   let pages = 0, stored = 0, maxSeq = 0;
-  outer: do {
+  do {
     const page = await core.executions(instanceId, { cursor, limit: opts.limit, status: opts.status, includeData: opts.includeData });
     for (const e of page.data) {
       const seq = seqOf(e.id);
-      if (seq && seq <= opts.stopSeq) break outer;
+      if (seq && seq <= opts.stopSeq) return { stored, maxSeq, limited: false };
       const started = ts(e.startedAt);
-      if (started !== null && started < opts.cutoff) break outer;
+      if (started !== null && started < opts.cutoff) return { stored, maxSeq, limited: false };
       store(instanceId, e);
       stored++;
       maxSeq = Math.max(maxSeq, seq);
     }
     cursor = page.nextCursor ?? undefined;
   } while (cursor && ++pages < opts.maxPages);
-  return { stored, maxSeq };
+  return { stored, maxSeq, limited: !!cursor };
 }
 
 const running = new Set<number>();
@@ -87,6 +87,12 @@ export async function pollInstance(inst: CoreInstance) {
   );
   try {
     const all = await scan(inst.id, { stopSeq: knownUpTo(inst.id), cutoff, maxPages: MAX_PAGES, limit: 250 });
+    // A gap may survive later successful polls (which start at newer IDs).
+    // Keep the warning until the affected history has aged out of retention.
+    const prior = db.prepare('SELECT last_success_at FROM poll_state WHERE instance_id = ?').get(inst.id) as { last_success_at: number | null };
+    if (all.limited || (prior.last_success_at !== null && prior.last_success_at < cutoff)) {
+      db.prepare('UPDATE poll_state SET incomplete_until = ? WHERE instance_id = ?').run(Date.now(), inst.id);
+    }
 
     const state = db.prepare('SELECT error_seq FROM poll_state WHERE instance_id = ?').get(inst.id) as { error_seq: number };
     const errs = await scan(inst.id, {
@@ -100,11 +106,11 @@ export async function pollInstance(inst: CoreInstance) {
     if (errs.maxSeq > state.error_seq) db.prepare('UPDATE poll_state SET error_seq = ? WHERE instance_id = ?').run(errs.maxSeq, inst.id);
 
     db.prepare('DELETE FROM executions WHERE instance_id = ? AND started_at < ?').run(inst.id, Date.now() - s.retentionDays * 864e5);
-    db.prepare('UPDATE poll_state SET last_poll_at = ?, ok = 1, error = NULL WHERE instance_id = ?').run(Date.now(), inst.id);
+    db.prepare('UPDATE poll_state SET last_poll_at = ?, last_success_at = ?, ok = 1, error = NULL WHERE instance_id = ?').run(Date.now(), Date.now(), inst.id);
     if (all.stored || errs.stored) await evaluateInstance(inst.id, inst.name);
   } catch (e) {
     const msg = packError(e);
-    db.prepare('UPDATE poll_state SET last_poll_at = ?, ok = 0, error = ? WHERE instance_id = ?').run(Date.now(), msg, inst.id);
+    db.prepare('UPDATE poll_state SET last_poll_at = ?, incomplete_until = ?, ok = 0, error = ? WHERE instance_id = ?').run(Date.now(), Date.now(), msg, inst.id);
     console.warn(t('log.healthInstance', { id: inst.id, reason: renderMessage(msg, t) }));
   } finally {
     running.delete(inst.id);

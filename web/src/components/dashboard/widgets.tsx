@@ -8,6 +8,7 @@ import { ActivityRow } from '../changes.tsx';
 import { AlertsCard } from '../health.tsx';
 import { Card, StatusDot } from '../ui.tsx';
 import { Heatmap } from './Heatmap.tsx';
+import { ExecutionHistoryWidget } from './ExecutionHistory.tsx';
 
 export interface WidgetProps { overview: Overview; instances: Instance[] }
 export type WidgetSection = 'status' | 'metrics' | 'main' | 'side';
@@ -90,6 +91,7 @@ export const DASHBOARD_WIDGETS: readonly WidgetDefinition[] = [
   { id: 'versionCount', label: 'dashboard.customize.versionCount', section: 'metrics', Component: VersionCount },
   { id: 'storage', label: 'dashboard.customize.storage', section: 'metrics', Component: Storage },
   { id: 'history', label: 'dashboard.customize.history', section: 'main', Component: History },
+  { id: 'executions', label: 'dashboard.customize.executions', section: 'main', Component: ExecutionHistoryWidget },
   { id: 'activity', label: 'dashboard.customize.activity', section: 'main', Component: Activity },
   { id: 'instances', label: 'dashboard.customize.instances', section: 'side', Component: Instances },
 ];

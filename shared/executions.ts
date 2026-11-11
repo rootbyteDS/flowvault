@@ -173,3 +173,25 @@ export interface HealthStatus {
   instances: { instanceId: number; name: string; lastPollAt: number | null; ok: boolean | null; error: string | null; executions: number }[];
   openAlerts: number;
 }
+
+export interface ExecutionDay {
+  day: number; // UTC epoch day, grouped by started_at
+  success: number;
+  failed: number; // error + crashed
+  canceled: number;
+}
+
+/** Aggregate counts only; no execution payloads or error messages. */
+export interface ExecutionHistory {
+  days: ExecutionDay[];
+  availableFrom: number | null;
+  availableTo: number | null;
+  settings: Pick<HealthSettings, 'enabled' | 'pollMinutes' | 'lookbackDays' | 'retentionDays' | 'includeManual'>;
+  instances: {
+    instanceId: number;
+    lastPollAt: number | null;
+    lastSuccessAt: number | null;
+    ok: boolean | null;
+    incomplete: boolean;
+  }[];
+}

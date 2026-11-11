@@ -4,6 +4,10 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- Dashboard-Widget „Ausführungsverlauf“ mit Tageskacheln für Fehlerquote oder Fehleranzahl, Instanzfilter und automatisch mitwachsendem Zeitraum. Es nutzt die bereits gespeicherten Ausführungen, weist abgebrochene Läufe separat aus und zeigt Abrufprobleme, Datenalter sowie möglicherweise unvollständige Historie an.
+
 ## [0.3.0] – 2026-11-10
 
 Erstes veröffentlichtes Release. Die vorherigen Versionsnummern (0.1.0 bis 0.2.6) waren Entwicklungsstände ohne eigenes Release; ihre Änderungen sind hier zusammengefasst.

@@ -36,6 +36,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_exec_wf ON executions(instance_id, workflow_n8n_id, started_at);
   CREATE INDEX IF NOT EXISTS idx_exec_seq ON executions(instance_id, seq);
+  CREATE INDEX IF NOT EXISTS idx_exec_started ON executions(started_at);
 
   CREATE TABLE IF NOT EXISTS poll_state (
     instance_id  INTEGER PRIMARY KEY,
@@ -68,6 +69,12 @@ db.exec(`
     UNIQUE (workflow_id, version_id)
   );
 `);
+
+// Additive migration for existing installations; older polling history is unknown.
+const pollColumns = new Set((db.prepare('PRAGMA table_info(poll_state)').all() as { name: string }[]).map((c) => c.name));
+for (const column of ['last_success_at', 'incomplete_until']) {
+  if (!pollColumns.has(column)) db.exec(`ALTER TABLE poll_state ADD COLUMN ${column} INTEGER`);
+}
 
 export const DEFAULT_SETTINGS: HealthSettings = {
   enabled: true,

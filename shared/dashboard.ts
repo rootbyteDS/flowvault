@@ -1,5 +1,5 @@
 /** Stable widget IDs are independent of translated titles and React components. */
-export const WIDGET_IDS = ['health', 'instanceCount', 'workflowCount', 'versionCount', 'storage', 'history', 'activity', 'instances'] as const;
+export const WIDGET_IDS = ['health', 'instanceCount', 'workflowCount', 'versionCount', 'storage', 'history', 'executions', 'activity', 'instances'] as const;
 export type WidgetId = typeof WIDGET_IDS[number];
 export interface DashboardLayout {
   version: 1;

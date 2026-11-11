@@ -1,7 +1,7 @@
 # Dashboard-Widgets
 
 Über **Dashboard anpassen** lassen sich die vier Kennzahlen, der Änderungsverlauf,
-die letzten Änderungen, die Instanzenübersicht sowie die Health-Warnungen einzeln
+der Ausführungsverlauf, die letzten Änderungen, die Instanzenübersicht sowie die Health-Warnungen einzeln
 ein- und ausblenden. Die Auswahl wird erst mit **Speichern** übernommen.
 **Standard wiederherstellen** setzt die Auswahl im Dialog zurück; anschließend speichern.
 
@@ -21,6 +21,8 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
   nicht eingebunden; beispielsweise ruft ein ausgeblendetes Health-Widget seine
   Warnungen nicht mehr ab.
 - `web/src/components/dashboard/Heatmap.tsx`: Änderungsverlauf samt Zeitraumwahl.
+- `web/src/components/dashboard/ExecutionHistory.tsx`: Ausführungsverlauf mit
+  Instanzfilter, Zeitraumwahl und Fehlerquote bzw. Fehleranzahl.
 - `web/src/components/dashboard/CustomizeDashboard.tsx`: Auswahl mit Entwurf,
   Speichern, Abbrechen und Zurücksetzen.
 - `server/dashboard.ts`: `GET /api/dashboard/layout` und `PUT /api/dashboard/layout`,
@@ -35,3 +37,50 @@ werden. Ein eigener Microservice ist für dieses Widget-System nicht erforderlic
 
 Die HTTP-Tests in `server/auth.test.ts` prüfen Zugriffsschutz, Speicherung über
 Sitzungen, Zurücksetzen, ungültige Schreibzugriffe und ältere Speicherformate.
+
+## Ausführungsverlauf
+
+Das standardmäßig eingeblendete Widget zeigt Tageskacheln aus der vorhandenen
+Health-Datenbank. Der neue Endpunkt `GET /api/health/executions/history` liefert
+Tageszähler und Abrufstatus, optional mit `?instance=<ID>`. Die Aggregation läuft
+im Health-Dienst hinter dessen internem Token und dem Login des Core-Proxys.
+Sie ruft weder n8n noch Ausführungsdetails ab. Das Widget aktualisiert sich im
+eingestellten Abrufintervall; ausgeblendet lädt es keine Daten.
+
+Zeitraum (automatisch, 4 Wochen, 3/6/12 Monate), Instanz und Darstellungsart bleiben
+in diesem Browser gespeichert. Automatisch wächst der Zeitraum anhand der
+vorhandenen Ausführungen. Die Kacheln verwenden wie der Änderungsverlauf
+UTC-Tagesgrenzen und die Startzeit der Ausführung. Fehler sind `error` und `crashed`;
+die Fehlerquote ist `Fehler / (success + error + crashed)`. Abgebrochene Läufe
+(`canceled`) werden separat gezählt, laufende oder wartende Läufe nicht ausgewertet.
+Manuelle Testläufe folgen der bestehenden Health-Einstellung.
+
+Die Farbstufen sind fest und ändern sich nicht mit dem gewählten Zeitraum:
+
+| Stufe | Fehlerquote | Fehleranzahl |
+| --- | --- | --- |
+| Grün | 0 % bei ausgewerteten Läufen | 0 bei ausgewerteten Läufen |
+| Gelb | >0 bis 1 % | 1–5 |
+| Amber | >1 bis 5 % | 6–20 |
+| Orange | >5 bis 20 % | 21–100 |
+| Rot | >20 % | >100 |
+
+Ohne ausgewertete Läufe bleiben Kacheln neutral, auch wenn ausschließlich
+Abbrüche vorliegen. Tageswerte erscheinen bei Berührung, Mauszeiger und Fokus;
+die Pfeiltasten wechseln Tage, Pos1 und Ende springen an Anfang bzw. heute.
+
+Die Datenverfügbarkeit ist durch n8n-Speicherung, Abrufrückblick und Aufbewahrung
+begrenzt (standardmäßig 14 Tage Rückblick und 30 Tage Aufbewahrung). Eine
+Jahresauswahl lädt keine zusätzliche Historie nach. Fehlende Tage sind keine
+Bestätigung eines fehlerfreien Betriebs. Das Widget nennt den gespeicherten
+Datenzeitraum und zeigt deaktivierte Erfassung, pausierte Instanzen, ausstehende
+oder fehlgeschlagene Abrufe sowie veraltete Daten an. Auch bei ausgeschalteter
+Erfassung werden Daten jenseits der eingestellten Aufbewahrung nicht angezeigt.
+
+Der Collector merkt sich zusätzlich den letzten erfolgreichen Abruf sowie
+mögliche Lücken durch fehlgeschlagene Abrufe, längere Unterbrechungen oder die
+bestehende Begrenzung auf 10.000 Läufe pro Durchgang. Ein später erfolgreicher
+Abruf beseitigt den Lückenhinweis nicht sofort; dieser läuft mit der Aufbewahrung
+aus. Die bestehende Datenbank erhält die Zusatzspalten automatisch. Historische
+Erfassungsabdeckung vor dieser Erweiterung ist nicht nachträglich nachweisbar;
+deshalb werden grundsätzlich nur gespeicherte Läufe ausgewiesen.
