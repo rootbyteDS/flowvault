@@ -6,13 +6,15 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 ### Hinzugefügt
 
+- Dashboard-Widgets lassen sich im Modus „Widgets anordnen“ per Ziehgriff mit Maus oder Touch sowie über Pfeilknöpfe und Tastatur verschieben. Speichern übernimmt die Reihenfolge für das Admin-Konto; Abbrechen verwirft den Entwurf. Ausgeblendete Widgets behalten ihre Position.
+
 - Dashboard-Widget „Ausführungsverlauf“ mit Tageskacheln für Fehlerquote oder Fehleranzahl, Instanzfilter und automatisch mitwachsendem Zeitraum. Es nutzt die bereits gespeicherten Ausführungen, weist abgebrochene Läufe separat aus und zeigt Abrufprobleme, Datenalter sowie möglicherweise unvollständige Historie an.
 
 ### Geändert
 
 - Der Wiederherstellungsdialog erklärt, dass die Credential-Verweise der gewählten Version mit den heutigen Zugangsdaten verwendet werden und gelöschte oder neu angelegte Credentials in n8n neu zugewiesen werden müssen. Beim Kopieren zwischen Instanzen weist er auf die erforderlichen Zuordnungen und vorhandenen Ziel-Credentials hin.
 
-- Die Prozentgrenzen der Farbstufen im Ausführungsverlauf lassen sich über das Zahnrad einstellen, werden im Browser gespeichert und direkt in Kacheln und Legende übernommen. Ungültige Grenzen werden nicht angewendet; ein Zurücksetzen auf 1 / 5 / 20 % ist möglich.
+- Die Prozentgrenzen der Farbstufen im Ausführungsverlauf lassen sich einschließlich Grün über das Zahnrad einstellen, beispielsweise Grün bis 0,3 %. Sie werden im Browser gespeichert und direkt in Kacheln und Legende übernommen. Ungültige Grenzen werden nicht angewendet; ein Zurücksetzen auf 0 / 1 / 5 / 20 % ist möglich. Bereits gespeicherte Gelb-/Amber-/Orange-Grenzen bleiben beim Update erhalten.
 
 - Einheitliche Widget-Namen auf dem Dashboard und in „Dashboard anpassen“. Die Einstellungen der Verlaufswidgets sind über ein Zahnrad direkt am Widget erreichbar; alle Widgets lassen sich über ein X ausblenden. Das direkte Ausblenden wird für das Admin-Konto gespeichert und erhält die übrige Widget-Auswahl.
 

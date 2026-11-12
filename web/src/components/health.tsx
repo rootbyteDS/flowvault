@@ -373,7 +373,7 @@ export function AlertsCard(controls: WidgetControls) {
   if (!list.length) return null;
 
   return (
-    <Card className="mb-6 border-del/30">
+    <Card className="border-del/30">
       <WidgetHeader id="health" {...controls} className="border-b border-line px-4 py-3" aside={
         <Link to={SETTINGS_LINK} className="mr-2 text-xs text-dim transition-colors hover:text-text">{t('health.alert.howDetected')}</Link>
       }>

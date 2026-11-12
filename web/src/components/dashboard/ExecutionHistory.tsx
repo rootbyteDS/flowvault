@@ -28,7 +28,8 @@ function rate(value: number | null) {
 }
 function rateLegend(thresholds: RateThresholds) {
   const percent = (value: number) => formatNumber(value / 100, { style: 'percent', maximumFractionDigits: 2 });
-  return [percent(0), ...thresholds.map((limit, i) => `>${formatNumber(i === 0 ? 0 : thresholds[i - 1], { maximumFractionDigits: 2 })}–${percent(limit)}`), `>${percent(thresholds[2])}`];
+  return [thresholds[0] === 0 ? percent(0) : `≤${percent(thresholds[0])}`,
+    ...thresholds.slice(1).map((limit, i) => `>${formatNumber(thresholds[i], { maximumFractionDigits: 2 })}–${percent(limit)}`), `>${percent(thresholds[3])}`];
 }
 const periodLabel = (p: HeatmapPeriod) => p === 'auto' ? t('dashboard.heatmap.auto') : p === '4w'
   ? t('dashboard.heatmap.weeks') : t('dashboard.heatmap.months', { count: Number.parseInt(p) });

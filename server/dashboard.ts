@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { defaultDashboardLayout, isDashboardLayoutInput, isWidgetId, normalizeDashboardLayout } from '../shared/dashboard.ts';
+import { defaultDashboardLayout, isDashboardLayoutInput, isWidgetId, isWidgetOrder, normalizeDashboardLayout, normalizeWidgetOrder } from '../shared/dashboard.ts';
 import { fail } from '../shared/i18n/server.ts';
 import { getSetting, setSetting, tx } from './db.ts';
 
@@ -19,8 +19,23 @@ export function createDashboardRouter() {
   });
   router.put('/layout', (req, res) => {
     if (!isDashboardLayoutInput(req.body)) fail(400, 'dashboard.customize.invalid');
-    const layout = normalizeDashboardLayout(req.body);
-    setSetting(SETTING, JSON.stringify(layout));
+    const layout = tx(() => {
+      const next = normalizeDashboardLayout(req.body);
+      // Older clients save visibility without knowing about widget ordering.
+      if (req.body.order === undefined) next.order = readLayout().order;
+      setSetting(SETTING, JSON.stringify(next));
+      return next;
+    });
+    res.json(layout);
+  });
+  router.patch('/layout/order', (req, res) => {
+    if (!req.body || Object.keys(req.body).length !== 1 || !isWidgetOrder(req.body.order)) fail(400, 'dashboard.customize.invalid');
+    const layout = tx(() => {
+      const next = readLayout();
+      next.order = normalizeWidgetOrder(req.body.order);
+      setSetting(SETTING, JSON.stringify(next));
+      return next;
+    });
     res.json(layout);
   });
   router.patch('/layout/widgets/:id', (req, res) => {

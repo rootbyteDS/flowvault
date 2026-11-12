@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { LayoutDashboard, Plus, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
+import { GripVertical, LayoutDashboard, Plus, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
 import { defaultDashboardLayout, type DashboardLayout, type WidgetId } from '../../../shared/dashboard.ts';
 import { api, useApi, type Instance, type Overview } from '../api.ts';
 import { CustomizeDashboard } from '../components/dashboard/CustomizeDashboard.tsx';
-import { DASHBOARD_WIDGETS, type WidgetSection } from '../components/dashboard/widgets.tsx';
+import { DashboardGrid } from '../components/dashboard/DashboardGrid.tsx';
 import { InstanceForm } from '../components/InstanceForm.tsx';
 import { Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, useToast } from '../components/ui.tsx';
 import { cx, timeAgo } from '../util.ts';
@@ -19,12 +19,16 @@ export function Dashboard() {
   const [customizing, setCustomizing] = useState(false);
   const [hiding, setHiding] = useState(false);
   const hideInFlight = useRef(false);
+  const [draftOrder, setDraftOrder] = useState<WidgetId[] | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [orderError, setOrderError] = useState<string>();
+  const orderInFlight = useRef(false);
   const layout = useApi<DashboardLayout>('/dashboard/layout');
   const instances = useApi<Instance[]>('/instances', { poll: (d) => (d.some((i) => i.syncing) ? 2000 : false) });
   const overview = useApi<Overview>('/overview', { poll: () => (instances.data?.some((i) => i.syncing) ? 2500 : 30000) });
 
   async function hideWidget(id: WidgetId) {
-    if (!layout.data || hideInFlight.current) return;
+    if (!layout.data || hideInFlight.current || draftOrder !== null) return;
     hideInFlight.current = true;
     setHiding(true);
     try {
@@ -36,6 +40,24 @@ export function Dashboard() {
     } finally {
       hideInFlight.current = false;
       setHiding(false);
+    }
+  }
+
+  async function saveOrder() {
+    if (!draftOrder || orderInFlight.current) return;
+    orderInFlight.current = true;
+    setSavingOrder(true);
+    setOrderError(undefined);
+    try {
+      const saved = await api<DashboardLayout>('/dashboard/layout/order', { method: 'PATCH', body: { order: draftOrder } });
+      layout.setData(saved);
+      setDraftOrder(null);
+      toast(t('dashboard.arrange.saved'));
+    } catch (error) {
+      setOrderError((error as Error).message);
+    } finally {
+      orderInFlight.current = false;
+      setSavingOrder(false);
     }
   }
 
@@ -76,14 +98,9 @@ export function Dashboard() {
   }
 
   const settings = layout.data ?? defaultDashboardLayout();
-  const visible = DASHBOARD_WIDGETS.filter((widget) => settings.widgets[widget.id].visible);
-  const section = (name: WidgetSection) => visible.filter((widget) => widget.section === name);
-  const renderSection = (name: WidgetSection) => section(name).map(({ id, Component }) => <Component key={id} overview={o} instances={list}
-    onHide={() => void hideWidget(id)} hideDisabled={!layout.data || hiding || customizing} />);
-  const metricCount = section('metrics').length;
-  const hasMain = section('main').length > 0;
-  const hasSide = section('side').length > 0;
-  const customizeButton = <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setCustomizing(true)} disabled={!layout.data || hiding}>{t('dashboard.customize.title')}</Button>;
+  const arranging = draftOrder !== null;
+  const visible = settings.order.filter((id) => settings.widgets[id].visible);
+  const customizeButton = <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setCustomizing(true)} disabled={!layout.data || hiding || arranging}>{t('dashboard.customize.title')}</Button>;
 
   return (
     <>
@@ -93,6 +110,8 @@ export function Dashboard() {
         actions={
           <>
             {customizeButton}
+            <Button icon={<GripVertical className="size-4" />} disabled={!layout.data || hiding || arranging || visible.length < 2}
+              onClick={() => { setDraftOrder([...settings.order]); setOrderError(undefined); }}>{t('dashboard.arrange.title')}</Button>
             <Button icon={<Plus className="size-4" />} onClick={() => setShowForm(true)}>{t('dashboard.addInstance')}</Button>
             <Button variant="primary" icon={<RefreshCw className={cx('size-4', syncing && 'animate-spin')} />} onClick={syncAll} disabled={syncing}>
               {t('dashboard.syncAll')}
@@ -105,16 +124,21 @@ export function Dashboard() {
         <ErrorBox>{layout.error}</ErrorBox>
         <Button size="sm" onClick={() => void layout.reload()}>{t('dashboard.customize.retry')}</Button>
       </div>}
-      {renderSection('status')}
+      {arranging && <Card className="mb-4 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-sm font-medium">{t('dashboard.arrange.title')}</span>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" disabled={savingOrder} onClick={() => setDraftOrder(defaultDashboardLayout().order)}>{t('dashboard.arrange.reset')}</Button>
+            <Button size="sm" disabled={savingOrder} onClick={() => { setDraftOrder(null); setOrderError(undefined); }}>{t('common.cancel')}</Button>
+            <Button size="sm" variant="primary" loading={savingOrder} onClick={() => void saveOrder()}>{t('common.save')}</Button>
+          </div>
+        </div>
+        {orderError && <div className="mt-3"><ErrorBox>{orderError}</ErrorBox></div>}
+      </Card>}
 
-      {metricCount > 0 && <div className={cx('grid gap-4', metricCount === 1 ? 'grid-cols-1' : metricCount === 2 ? 'grid-cols-2' : metricCount === 3 ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 lg:grid-cols-4')}>
-        {renderSection('metrics')}
-      </div>}
-
-      {(hasMain || hasSide) && <div className={cx('grid gap-6', metricCount > 0 && 'mt-6', hasMain && hasSide && 'xl:grid-cols-3')}>
-        {hasMain && <div className={cx('min-w-0 space-y-6', hasSide && 'xl:col-span-2')}>{renderSection('main')}</div>}
-        {hasSide && <div className="min-w-0 space-y-6">{renderSection('side')}</div>}
-      </div>}
+      <DashboardGrid layout={settings} order={draftOrder ?? settings.order} overview={o} instances={list}
+        onHide={(id) => void hideWidget(id)} hideDisabled={!layout.data || hiding || customizing}
+        onReorder={arranging ? (order) => { if (!orderInFlight.current) setDraftOrder(order); } : undefined} disabled={savingOrder} />
 
       {visible.length === 0 && <Card>
         <EmptyState icon={<LayoutDashboard className="size-6" />} title={t('dashboard.customize.emptyTitle')} action={customizeButton}>

@@ -12,11 +12,10 @@ import { ExecutionHistoryWidget } from './ExecutionHistory.tsx';
 import { WidgetHeader, type WidgetControls } from './WidgetHeader.tsx';
 
 export interface WidgetProps extends WidgetControls { overview: Overview; instances: Instance[] }
-export type WidgetSection = 'status' | 'metrics' | 'main' | 'side';
 interface WidgetDefinition {
   id: WidgetId;
   hint?: MessageKey;
-  section: WidgetSection;
+  columns: 3 | 4 | 6 | 8 | 12;
   Component: ComponentType<WidgetProps>;
 }
 
@@ -82,13 +81,13 @@ function Instances({ instances, ...controls }: WidgetProps) {
 
 /** Add new widgets here and their stable IDs/defaults in shared/dashboard.ts. */
 export const DASHBOARD_WIDGETS: readonly WidgetDefinition[] = [
-  { id: 'health', hint: 'dashboard.customize.healthHint', section: 'status', Component: AlertsCard },
-  { id: 'instanceCount', section: 'metrics', Component: InstanceCount },
-  { id: 'workflowCount', section: 'metrics', Component: WorkflowCount },
-  { id: 'versionCount', section: 'metrics', Component: VersionCount },
-  { id: 'storage', section: 'metrics', Component: Storage },
-  { id: 'history', section: 'main', Component: History },
-  { id: 'executions', section: 'main', Component: ExecutionHistoryWidget },
-  { id: 'activity', section: 'main', Component: Activity },
-  { id: 'instances', section: 'side', Component: Instances },
+  { id: 'health', hint: 'dashboard.customize.healthHint', columns: 12, Component: AlertsCard },
+  { id: 'instanceCount', columns: 3, Component: InstanceCount },
+  { id: 'workflowCount', columns: 3, Component: WorkflowCount },
+  { id: 'versionCount', columns: 3, Component: VersionCount },
+  { id: 'storage', columns: 3, Component: Storage },
+  { id: 'history', columns: 6, Component: History },
+  { id: 'executions', columns: 6, Component: ExecutionHistoryWidget },
+  { id: 'activity', columns: 8, Component: Activity },
+  { id: 'instances', columns: 4, Component: Instances },
 ];

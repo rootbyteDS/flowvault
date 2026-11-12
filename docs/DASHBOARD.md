@@ -5,6 +5,29 @@ der Ausführungsverlauf, die letzten Änderungen, die Instanzenübersicht sowie 
 ein- und ausblenden. Die Auswahl wird erst mit **Speichern** übernommen.
 **Standard wiederherstellen** setzt die Auswahl im Dialog zurück; anschließend speichern.
 
+Über **Widgets anordnen** lässt sich die Reihenfolge direkt auf dem Dashboard
+ändern. Widgets am Griff auf ein anderes Widget ziehen und dort loslassen. Das
+funktioniert mit Maus, Stift und Touch; beim Ziehen am Bildschirmrand scrollt die
+Seite mit. Alternativ verschieben die Pfeilknöpfe ein Widget nach vorne bzw.
+hinten. Am fokussierten Griff funktionieren die Pfeiltasten sowie Pos1 und Ende.
+Die Änderung wird erst mit **Speichern** serverseitig übernommen. **Abbrechen**
+verwirft den Entwurf, auch nach mehreren Verschiebungen. Bei einem Speicherfehler
+bleibt der Entwurf mit Fehlermeldung erhalten und kann erneut gespeichert werden.
+
+Das gemeinsame Raster bricht die Widgets je nach Bildschirmbreite um. Auf großen
+Bildschirmen sind Kennzahlen kompakt, die beiden Verlaufswidgets jeweils eine
+halbe Zeile breit; die letzten Änderungen und Instanzenübersicht teilen sich
+standardmäßig eine Zeile. Die Reihenfolge gilt über diese früher getrennten
+Bereiche hinweg und entspricht auch auf kleinen Bildschirmen der Lesereihenfolge.
+Ein Warnungswidget ohne Warnungen ist im Anordnen-Modus über seine beschriftete
+Leiste erreichbar; sonst nimmt es keinen Platz ein.
+
+Ausgeblendete Widgets bleiben in der gespeicherten Reihenfolge und erscheinen
+beim Wiedereinblenden wieder an ihrer Position. **Standardreihenfolge** im
+Anordnen-Modus setzt nur die Reihenfolge des Entwurfs zurück. **Standard
+wiederherstellen** unter **Dashboard anpassen** setzt sowohl Sichtbarkeit als
+auch Reihenfolge zurück. Beide Änderungen müssen anschließend gespeichert werden.
+
 Alle Widget-Kopfzeilen verwenden dieselben Namen wie die Auswahl unter
 **Dashboard anpassen**. Beispielsweise heißt die Instanzenliste überall
 **Instanzenübersicht**, während die Kennzahl **Instanzen** heißt.
@@ -32,8 +55,10 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
 - `shared/dashboard.ts`: feste Widget-IDs, versioniertes Speicherformat, Vorgaben
   und Validierung. Fehlende IDs in älteren Einstellungen bekommen die Vorgaben
   neuer Widgets. Beschädigte Einstellungen fallen auf die Standardansicht zurück.
+- `web/src/components/dashboard/DashboardGrid.tsx`: responsives Raster, Ziehen
+  per Pointer Events, Scrollen am Bildschirmrand und Tastatur-/Pfeilbedienung.
 - `web/src/components/dashboard/widgets.tsx`: Widget-Komponenten und Registrierung
-  mit ID und Layoutbereich. Die Titel in `web/src/widget-titles.ts` werden von
+  mit ID und Standardbreite im Raster. Die Titel in `web/src/widget-titles.ts` werden von
   Kopfzeile und Sichtbarkeitsauswahl gemeinsam verwendet. Deaktivierte Komponenten werden
   nicht eingebunden; beispielsweise ruft ein ausgeblendetes Health-Widget seine
   Warnungen nicht mehr ab.
@@ -46,13 +71,18 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
   Widget-Titel, Ausblenden und optionalem Einstellungsbereich.
 - `server/dashboard.ts`: `GET /api/dashboard/layout` und `PUT /api/dashboard/layout`,
   sowie `PATCH /api/dashboard/layout/widgets/:id` für die Sichtbarkeit eines
-  einzelnen Widgets. Die Teilaktualisierung verändert die übrige gespeicherte
-  Auswahl nicht. Alle liegen hinter Anmeldung und JSON-/CSRF-Schutz des Cores.
+  einzelnen Widgets und `PATCH /api/dashboard/layout/order` für die Reihenfolge.
+  Die Teilaktualisierungen verändern die jeweils anderen Einstellungen nicht.
+  Alle liegen hinter Anmeldung und JSON-/CSRF-Schutz des Cores.
 
 Für ein neues Widget eine ID mit Vorgabe ergänzen, die Komponente registrieren
-und die Texte in beiden Sprachkatalogen ergänzen. Das Dashboard ordnet die sichtbaren
-Bereiche ohne leere Seitenleiste an. Reihenfolge und Größen sind derzeit fest;
-zusätzliche Einstellungen können später im versionierten Layout ergänzt werden.
+und die Texte in beiden Sprachkatalogen ergänzen. Die Reihenfolge wird als `order`
+im bestehenden Layout gespeichert; alte Einstellungen bekommen die Standardfolge.
+Neue Widgets werden an vorhandene Reihenfolgen angehängt, unbekannte und doppelte
+IDs beim Lesen bereinigt. Schreibzugriffe mit unbekannten oder doppelten IDs werden
+abgelehnt. Alte Clients ohne `order` können ihre Sichtbarkeit weiterhin speichern,
+ohne die neuere Reihenfolge zurückzusetzen. Die Widget-Größen sind weiterhin
+vorgegeben; zusätzliche Einstellungen können im versionierten Layout ergänzt werden.
 Für mehrere Benutzer muss die Speicherung an eine stabile Benutzer-ID gebunden
 werden. Ein eigener Microservice ist für dieses Widget-System nicht erforderlich.
 
@@ -77,17 +107,21 @@ die Fehlerquote ist `Fehler / (success + error + crashed)`. Abgebrochene Läufe
 Manuelle Testläufe folgen der bestehenden Health-Einstellung.
 
 Die Farbstufen ändern sich nicht mit dem gewählten Zeitraum. Im Zahnrad des
-Ausführungsverlaufs lassen sich für **Fehlerquote** die oberen Grenzen für Gelb,
-Amber und Orange einstellen. Die Werte sind inklusive; Rot beginnt oberhalb der
-Orange-Grenze. Grün bleibt 0 % Fehler bei vorhandenen ausgewerteten Läufen.
+Ausführungsverlaufs lassen sich für **Fehlerquote** die oberen Grenzen für Grün,
+Gelb, Amber und Orange einstellen. Die Werte sind inklusive; Rot beginnt oberhalb
+der Orange-Grenze. Beispielsweise färbt **Grün bis 0,3 %** Tage mit einer
+Fehlerquote bis einschließlich 0,3 % grün. Ohne ausgewertete Läufe bleiben Tage
+weiterhin neutral.
 
-Gültig sind drei streng aufsteigende Prozentwerte zwischen 0,01 und 99,99 mit
+Gültig sind vier streng aufsteigende Prozentwerte zwischen 0 und 99,99 mit
 höchstens zwei Nachkommastellen. Nur gültige Eingaben werden sofort angewendet
 und mit den anderen Widget-Einstellungen in diesem Browser gespeichert. Bei
 leeren oder ungültigen Eingaben erscheint ein Hinweis; Kacheln und Legende behalten
 die zuletzt gültigen Grenzen. Beim Schließen werden ungültige Entwürfe verworfen.
-**Farbgrenzen zurücksetzen** stellt die Standardwerte 1 / 5 / 20 % wieder her.
-Vorhandene ältere Widget-Einstellungen bekommen diese Standardwerte automatisch.
+**Farbgrenzen zurücksetzen** stellt die Standardwerte 0 / 1 / 5 / 20 % wieder her.
+Vorhandene ältere Widget-Einstellungen ohne Farbgrenzen bekommen diese Standardwerte
+automatisch. Bereits gespeicherte drei Grenzen für Gelb, Amber und Orange bleiben
+erhalten und werden um die bisherige Grün-Grenze 0 % ergänzt.
 Die Grenzen ändern nur die Darstellung, nicht die Health-Warnregeln.
 
 Die **Fehleranzahl** behält ihre festen Zählergrenzen. Standardwerte:

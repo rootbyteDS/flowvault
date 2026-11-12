@@ -461,11 +461,13 @@ test('dashboard preferences require a full session for reads and writes', async 
   const anonymous = new Browser();
   assert.equal((await anonymous.request('/dashboard/layout')).status, 401);
   assert.equal((await anonymous.put('/dashboard/layout', defaultDashboardLayout())).status, 401);
+  assert.equal((await anonymous.patch('/dashboard/layout/order', { order: [] })).status, 401);
   await enabled();
   const pending = new Browser();
   assert.equal((await pending.login()).body.twoFactorRequired, true);
   assert.equal((await pending.request('/dashboard/layout')).status, 401);
   assert.equal((await pending.put('/dashboard/layout', defaultDashboardLayout())).status, 401);
+  assert.equal((await pending.patch('/dashboard/layout/order', { order: [] })).status, 401);
 });
 
 test('dashboard defaults, hidden widgets and reset persist across admin sessions', async () => {
@@ -546,4 +548,39 @@ test('invalid widget visibility changes cannot overwrite saved preferences', asy
     assert.equal((await browser.patch(`/dashboard/layout/widgets/${unknown}`, { visible: false })).status, 400);
     assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
   }
+});
+
+test('widget order persists across devices and is independent of visibility updates and older clients', async () => {
+  const browser = await configured();
+  const order = [...defaultDashboardLayout().order].reverse();
+  await browser.patch('/dashboard/layout/widgets/history', { visible: false });
+  const response = await browser.patch('/dashboard/layout/order', { order });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.order, order);
+  assert.equal(response.body.widgets.history.visible, false);
+  const second = new Browser();
+  await second.login();
+  assert.deepEqual((await second.request('/dashboard/layout')).body.order, order);
+  await second.patch('/dashboard/layout/widgets/executions', { visible: false });
+  assert.deepEqual((await browser.request('/dashboard/layout')).body.order, order);
+  const legacy = { version: 1, widgets: { storage: { visible: false } } };
+  const changed = await browser.put('/dashboard/layout', legacy);
+  assert.deepEqual(changed.body.order, order);
+  assert.equal(changed.body.widgets.storage.visible, false);
+  const reset = await second.put('/dashboard/layout', defaultDashboardLayout());
+  assert.deepEqual(reset.body, defaultDashboardLayout());
+});
+
+test('invalid order writes preserve the saved layout; partial orders append missing widgets', async () => {
+  const browser = await configured();
+  const before = (await browser.request('/dashboard/layout')).body;
+  for (const body of [null, [], {}, { order: null }, { order: 'history' }, { order: ['history', 'history'] },
+    { order: ['unknown'] }, { order: [1] }, { order: [], widgets: {} }]) {
+    assert.equal((await browser.patch('/dashboard/layout/order', body)).status, 400);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
+  }
+  const response = await browser.patch('/dashboard/layout/order', { order: ['instances'] });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.order, ['instances', ...before.order.filter((id: string) => id !== 'instances')]);
+  assert.deepEqual(JSON.parse(getSetting('admin_dashboard_layout')!).order, response.body.order);
 });

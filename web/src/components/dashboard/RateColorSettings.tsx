@@ -3,8 +3,8 @@ import { DEFAULT_RATE_THRESHOLDS, isRateThresholds, type RateThresholds } from '
 import { t, type MessageKey } from '../../i18n.tsx';
 import { Button, Field } from '../ui.tsx';
 
-const labels: MessageKey[] = ['dashboard.executions.yellowLimit', 'dashboard.executions.amberLimit', 'dashboard.executions.orangeLimit'];
-const colors = ['bg-yellow-400', 'bg-amber-500', 'bg-orange-500'];
+const labels: MessageKey[] = ['dashboard.executions.greenLimit', 'dashboard.executions.yellowLimit', 'dashboard.executions.amberLimit', 'dashboard.executions.orangeLimit'];
+const colors = ['bg-emerald-500', 'bg-yellow-400', 'bg-amber-500', 'bg-orange-500'];
 
 export function RateColorSettings({ thresholds, onChange }: { thresholds: RateThresholds; onChange: (value: RateThresholds) => void }) {
   const [draft, setDraft] = useState(() => thresholds.map(String));
@@ -19,11 +19,11 @@ export function RateColorSettings({ thresholds, onChange }: { thresholds: RateTh
   return <fieldset className="space-y-3 border-t border-line pt-3">
     <legend className="text-sm font-medium">{t('dashboard.executions.colorLimits')}</legend>
     <p id={`${id}-hint`} className="text-xs text-dim">{t('dashboard.executions.colorHint')}</p>
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {labels.map((label, i) => <Field key={label} label={t(label)}>
         <div className="flex items-center gap-2">
           <span aria-hidden className={`size-3 shrink-0 rounded-[2px] ${colors[i]}`} />
-          <input type="number" min={0.01} max={99.99} step={0.01} value={draft[i]} onChange={(e) => edit(i, e.target.value)}
+          <input type="number" min={i === 0 ? 0 : 0.01} max={99.99} step={0.01} value={draft[i]} onChange={(e) => edit(i, e.target.value)}
             aria-label={t(label)} aria-invalid={!valid} aria-describedby={`${id}-hint${valid ? '' : ` ${id}-error`}`}
             className="h-9 w-full min-w-0 rounded-lg border border-line-2 bg-sidebar px-2 text-sm text-text outline-none focus:border-accent" />
         </div>

@@ -58,39 +58,49 @@ test('automatic history period grows with available runs, and existing dashboard
 
 test('custom percent thresholds apply inclusively, including fractional percentage boundaries', () => {
   for (const [failed, expected] of [[0, 0], [2, 1], [3, 2], [10, 2], [11, 3], [40, 3], [41, 4], [100, 4]]) {
-    assert.equal(executionLevel({ success: 100 - failed, failed }, 'rate', [2, 10, 40]), expected);
+    assert.equal(executionLevel({ success: 100 - failed, failed }, 'rate', [0, 2, 10, 40]), expected);
   }
   for (const [failed, expected] of [[7, 1], [8, 2], [29, 2], [30, 3], [99, 3], [100, 4]]) {
-    assert.equal(executionLevel({ success: 10000 - failed, failed }, 'rate', [0.07, 0.29, 0.99]), expected);
+    assert.equal(executionLevel({ success: 10000 - failed, failed }, 'rate', [0, 0.07, 0.29, 0.99]), expected);
   }
-  assert.equal(executionLevel({ success: 9999, failed: 1 }, 'rate', [0.01, 0.02, 0.03]), 1);
+  assert.equal(executionLevel({ success: 9999, failed: 1 }, 'rate', [0, 0.01, 0.02, 0.03]), 1);
+});
+
+test('a green limit of 0.3 percent includes small error rates and the exact boundary', () => {
+  for (const [failed, expected] of [[0, 0], [1, 0], [3, 0], [4, 1], [10, 1], [11, 2], [50, 2], [51, 3], [200, 3], [201, 4]]) {
+    assert.equal(executionLevel({ success: 1000 - failed, failed }, 'rate', [0.3, 1, 5, 20]), expected);
+  }
+  assert.equal(executionLevel({ success: 0, failed: 0 }, 'rate', [0.3, 1, 5, 20]), -1);
 });
 
 test('threshold validation rejects ambiguous, unordered or unusable color ranges', () => {
-  assert.equal(isRateThresholds([0.01, 0.1, 99.99]), true);
+  assert.equal(isRateThresholds([0, 0.01, 0.1, 99.99]), true);
   assert.equal(isRateThresholds(DEFAULT_RATE_THRESHOLDS), true);
-  for (const invalid of [null, {}, [], [1, 5], [1, 5, 20, 30], ['1', 5, 20], [0, 5, 20], [-1, 5, 20],
-    [1, 1, 20], [5, 1, 20], [1, 5, 100], [1, 5, 101], [0.001, 5, 20], [1, 5.555, 20], [NaN, 5, 20], [1, 5, Infinity]]) {
+  for (const invalid of [null, {}, [], [1, 5], [1, 5, 20], [0, 1, 5, 20, 30], [0, '1', 5, 20], [-1, 1, 5, 20],
+    [0, 1, 1, 20], [0, 5, 1, 20], [0, 1, 5, 100], [0, 1, 5, 101], [0.001, 1, 5, 20], [0, 1, 5.555, 20], [NaN, 1, 5, 20], [0, 1, 5, Infinity]]) {
     assert.equal(isRateThresholds(invalid), false, String(invalid));
   }
 });
 
 test('existing widget preferences migrate and custom thresholds survive storage round trips', () => {
   const old = { period: '6m', metric: 'count', instance: '42' };
-  assert.deepEqual(normalizeExecutionPreferences(old), { ...old, rateThresholds: [1, 5, 20] });
-  const custom = { ...old, metric: 'rate', rateThresholds: [0.25, 3.5, 12] };
+  assert.deepEqual(normalizeExecutionPreferences(old), { ...old, rateThresholds: [0, 1, 5, 20] });
+  const custom = { ...old, metric: 'rate', rateThresholds: [0.3, 1, 3.5, 12] };
   assert.deepEqual(normalizeExecutionPreferences(JSON.parse(JSON.stringify(custom))), custom);
+  assert.deepEqual(normalizeExecutionPreferences({ ...old, rateThresholds: [0.25, 3.5, 12] }), {
+    ...old, rateThresholds: [0, 0.25, 3.5, 12],
+  });
   for (const invalid of [[1, 1, 20], [0, 10, 20], 'broken', null]) {
-    assert.deepEqual(normalizeExecutionPreferences({ ...old, rateThresholds: invalid }), { ...old, rateThresholds: [1, 5, 20] });
+    assert.deepEqual(normalizeExecutionPreferences({ ...old, rateThresholds: invalid }), { ...old, rateThresholds: [0, 1, 5, 20] });
   }
-  assert.deepEqual(normalizeExecutionPreferences(null), { period: 'auto', metric: 'rate', instance: 'all', rateThresholds: [1, 5, 20] });
+  assert.deepEqual(normalizeExecutionPreferences(null), { period: 'auto', metric: 'rate', instance: 'all', rateThresholds: [0, 1, 5, 20] });
   assert.notEqual(normalizeExecutionPreferences(null).rateThresholds, DEFAULT_RATE_THRESHOLDS);
 });
 
 test('percentage preferences never recolor count mode, missing runs or error-free days', () => {
   for (const failed of [0, 1, 5, 6, 20, 21, 100, 101]) {
-    assert.equal(executionLevel({ success: 100, failed }, 'count', [10, 20, 30]), executionLevel({ success: 100, failed }, 'count'));
+    assert.equal(executionLevel({ success: 100, failed }, 'count', [5, 10, 20, 30]), executionLevel({ success: 100, failed }, 'count'));
   }
-  assert.equal(executionLevel({ success: 0, failed: 0 }, 'rate', [10, 20, 30]), -1);
-  assert.equal(executionLevel({ success: 1, failed: 0 }, 'rate', [10, 20, 30]), 0);
+  assert.equal(executionLevel({ success: 0, failed: 0 }, 'rate', [0, 10, 20, 30]), -1);
+  assert.equal(executionLevel({ success: 1, failed: 0 }, 'rate', [0, 10, 20, 30]), 0);
 });

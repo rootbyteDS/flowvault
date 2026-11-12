@@ -36,7 +36,7 @@ export function CustomizeDashboard({ layout, onClose, onSaved }: {
     <p className="mb-5 text-sm text-muted">{t('dashboard.customize.hint')}</p>
     {error && <div className="mb-4"><ErrorBox>{error}</ErrorBox></div>}
     <fieldset disabled={saving} className="space-y-1">
-      {DASHBOARD_WIDGETS.map((widget) => (
+      {draft.order.map((id) => DASHBOARD_WIDGETS.find((widget) => widget.id === id)!).map((widget) => (
         <label key={widget.id} className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-panel-3">
           <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-accent-strong"
             checked={draft.widgets[widget.id].visible}

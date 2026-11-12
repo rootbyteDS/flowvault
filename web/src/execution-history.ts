@@ -2,12 +2,12 @@ import type { ExecutionDay, ExecutionHistory } from '../../shared/executions.ts'
 import { heatmapData, isHeatmapPeriod, type HeatmapPeriod } from './heatmap.ts';
 
 export type ExecutionMetric = 'rate' | 'count';
-export type RateThresholds = readonly [number, number, number]; // upper bounds in percent
-export const DEFAULT_RATE_THRESHOLDS: RateThresholds = [1, 5, 20];
+export type RateThresholds = readonly [number, number, number, number]; // green, yellow, amber, orange upper bounds in percent
+export const DEFAULT_RATE_THRESHOLDS: RateThresholds = [0, 1, 5, 20];
 
 export function isRateThresholds(value: unknown): value is RateThresholds {
-  return Array.isArray(value) && value.length === 3 && value.every((n, i) =>
-    typeof n === 'number' && Number.isFinite(n) && n >= 0.01 && n <= 99.99 &&
+  return Array.isArray(value) && value.length === 4 && value.every((n, i) =>
+    typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 99.99 &&
     Math.round(n * 100) / 100 === n && (i === 0 || n > value[i - 1]));
 }
 
@@ -21,11 +21,14 @@ export interface ExecutionPreferences {
 /** Keep existing preferences when upgrading; reject corrupt color scales. */
 export function normalizeExecutionPreferences(value: unknown): ExecutionPreferences {
   const stored = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  // Earlier settings contained only yellow, amber and orange limits.
+  const thresholds = Array.isArray(stored.rateThresholds) && stored.rateThresholds.length === 3
+    ? [0, ...stored.rateThresholds] : stored.rateThresholds;
   return {
     period: isHeatmapPeriod(stored.period) ? stored.period : 'auto',
     metric: stored.metric === 'count' ? 'count' : 'rate',
     instance: typeof stored.instance === 'string' && /^[1-9]\d*$/.test(stored.instance) && Number.isSafeInteger(Number(stored.instance)) ? stored.instance : 'all',
-    rateThresholds: isRateThresholds(stored.rateThresholds) ? [...stored.rateThresholds] : [...DEFAULT_RATE_THRESHOLDS],
+    rateThresholds: isRateThresholds(thresholds) ? [...thresholds] : [...DEFAULT_RATE_THRESHOLDS],
   };
 }
 
@@ -47,9 +50,11 @@ export function executionLevel(day: Pick<ExecutionDay, 'success' | 'failed'>, me
   const total = day.success + day.failed;
   if (!total) return -1;
   if (!day.failed) return 0;
-  const bounds = isRateThresholds(thresholds) ? thresholds : DEFAULT_RATE_THRESHOLDS;
-  // Compare integer basis points to avoid rounding a day into the next band.
-  const value = metric === 'rate' ? day.failed * 10000 : day.failed;
-  const [low, medium, high] = metric === 'rate' ? bounds.map((n) => Math.round(n * 100) * total) : [5, 20, 100];
-  return value <= low ? 1 : value <= medium ? 2 : value <= high ? 3 : 4;
+  if (metric === 'rate') {
+    const bounds = isRateThresholds(thresholds) ? thresholds : DEFAULT_RATE_THRESHOLDS;
+    // Compare integer basis points to avoid rounding a day into the next band.
+    const level = bounds.findIndex((n) => day.failed * 10000 <= Math.round(n * 100) * total);
+    return level === -1 ? 4 : level;
+  }
+  return day.failed <= 5 ? 1 : day.failed <= 20 ? 2 : day.failed <= 100 ? 3 : 4;
 }
