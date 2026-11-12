@@ -18,7 +18,8 @@ import {
   backfill, generateForVersion, listModels, publicAiConfig, resumeQueue, saveAiConfig, wouldMoveStoredKey,
 } from './ai.ts';
 import { healthProxy, internalRouter } from './internal.ts';
-import { startHealthService } from './services.ts';
+import { startServices } from './services.ts';
+import { createMcpEndpoint, mcpAdminProxy } from './mcp.ts';
 import { promoteRouter } from './promote/router.ts';
 import { HttpError, languageWarning, requestT, t } from '../shared/i18n/server.ts';
 import { renderError, type Translator } from '../shared/i18n/index.ts';
@@ -102,8 +103,11 @@ app.use('/api', (req, _res, next) => {
 
 app.use(express.json({ limit: '1mb' }));
 
-// Interne API für Zusatzdienste (Health-Dienst) – eigenes Token statt Login, siehe internal.ts
+// Interne API für Zusatzdienste (Health-, MCP-Dienst) – eigenes Token statt Login, siehe internal.ts
 app.use('/internal', internalRouter);
+
+// MCP für Agents – Agent-Token statt Login, nur lesend, siehe mcp.ts und services/mcp
+app.all('/mcp', createMcpEndpoint(clientIp));
 
 // ───────────────────────── Auth ─────────────────────────
 
@@ -527,6 +531,10 @@ app.use('/api/promote', promoteRouter);
 
 app.use('/api/health', healthProxy);
 
+// ───────────────────────── MCP-Dienst (Zugang für Agents verwalten) ─────────────────────────
+
+app.use('/api/mcp', mcpAdminProxy);
+
 app.use('/api', (_req, _res) => {
   throw new HttpError(404, 'errors.http.unknownEndpoint');
 });
@@ -558,5 +566,5 @@ app.listen(PORT, HOST, () => {
   announceSetupCode();
   startScheduler();
   resumeQueue();
-  startHealthService(PORT);
+  startServices(PORT);
 });

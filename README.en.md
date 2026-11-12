@@ -22,6 +22,7 @@ Connect as many n8n instances as you like. FlowVault backs up all workflows auto
 - **Deleted workflows** are kept with their complete history
 - **Archived workflows** are skipped by default. Switch them on per instance under *Edit instance → Back up archived workflows*. History that was already saved is kept (Workflows → “Archived”).
 - **Which change broke it?** FlowVault fetches the executions from n8n and lays them over the version history: failure rate per version (“since v14, 38 % fail, before 0 %”), the node that has been failing since the change marked red in the diff canvas, and a warning with a rollback suggestion when the rate rises. Rollback with one click. It runs as its own process inside FlowVault, see [Health service](#health-service-failure-rate-per-version)
+- **AI agents can ask (MCP)**: Claude, ChatGPT or Cursor ask, read-only, how your instances are doing and which runs failed. No workflow content, secrets in messages masked, off by default. See [AI agents (MCP)](#ai-agents-mcp)
 - **Download** every version as JSON that n8n can import
 - **Customisable dashboard**: show or hide key figures, change history, recent changes, the instance overview and health warnings individually ([details](docs/DASHBOARD.md), German)
 - Activity feed and heatmap, sync log per instance
@@ -102,10 +103,11 @@ docker compose up -d
 | `UPDATE_WEBHOOK_TOKEN` | –      | Optional bearer token for the deployment webhook, used server-side only |
 | `UPDATE_MANAGEMENT_URL` | –     | Optional public link to the deployment history or Arcane project |
 | `HEALTH_PORT`    | `4100`       | Internal port of the health service (`127.0.0.1` only, never exposed) |
+| `MCP_PORT`       | `4200`       | Internal port of the MCP service (`127.0.0.1` only; agents reach it through the core’s `/mcp`) |
 
 Docker Compose only passes the variables listed under `environment` in `docker-compose.yml`; add further ones there. When started directly via npm, `.env` is not loaded automatically: set variables in the shell, e.g. `PORT=4001 HEALTH_PORT=4101 npm start` (macOS/Linux).
 
-FlowVault starts the health service itself as a child process and restarts it after a crash. If it fails, FlowVault keeps running normally, just without operating data. The core and the service share an internal token that is stored automatically in `data/internal.token`.
+FlowVault starts the health and MCP services itself as child processes and restarts them after a crash. If one fails, FlowVault keeps running normally, just without operating data or agent access. The core and the services use internal tokens that are stored automatically in `data/internal.token` and `data/mcp.token`.
 
 ## Backing up FlowVault itself
 
@@ -115,7 +117,7 @@ Back up `flowvault.db` (SQLite, workflow versions compressed and encrypted) from
 
 For a simple file copy, stop FlowVault first (`docker compose stop flowvault` or stop the local server). Do not make an isolated copy of `flowvault.db` while it is running: SQLite additionally uses WAL files. Afterwards, start FlowVault again.
 
-`health.db` contains derived execution data, warnings and the settings of the health service. Existing executions can be fetched again from n8n, as far as n8n still has them stored. Back up this file too if you want to keep settings and warning states.
+`health.db` contains derived execution data, warnings and the settings of the health service. Existing executions can be fetched again from n8n, as far as n8n still has them stored. Back up this file too if you want to keep settings and warning states. `mcp.db` contains the on/off switch and the fingerprints of the agent tokens; without it you have to switch access on again and create new tokens.
 
 ## Version and updates
 
@@ -190,6 +192,39 @@ GitHub only sees the code, not how it runs in production. FlowVault connects bot
 
 All thresholds are under **Settings → Failure rate per version**.
 
+## AI agents (MCP)
+
+Through the [Model Context Protocol](https://modelcontextprotocol.io), AI assistants such as Claude, ChatGPT or Cursor ask FlowVault how your n8n instances are doing: “How are my instances doing, is there anything I should look at?” or “Did you notice anything in recent executions?”. Access is **read-only** and off by default.
+
+**Setup:** Switch it on under **Settings → Access for AI agents (MCP)** and create one token per agent, optionally limited to certain instances. The token is shown exactly once. In the agent, enter the address `https://<your-flowvault-address>/mcp` and the header `Authorization: Bearer fv_mcp_…`, for example:
+
+```json
+{
+  "mcpServers": {
+    "flowvault": {
+      "type": "http",
+      "url": "https://flowvault.example.com/mcp",
+      "headers": { "Authorization": "Bearer fv_mcp_…" }
+    }
+  }
+}
+```
+
+| Tool | Answers |
+|------|---------|
+| `get_status` | Verdict per instance (ok, warning, critical) with reasons: sync, execution fetching, open alerts, failures of the last 24 hours |
+| `list_recent_failures` | Failed runs grouped by workflow, node and message, with a note whether the workflow has run successfully since |
+| `list_alerts` | Open alerts with failing nodes and a rollback suggestion |
+| `get_workflow_health` | Failure rate per version of one workflow |
+| `get_recent_changes` | Workflows created, changed, deleted or restored, sync errors |
+| `list_workflows` | Backed-up workflows with state, number of nodes and versions |
+
+- **Read-only**: Agents cannot sync, restore or change anything. The MCP service never calls n8n itself; it reads what FlowVault has already stored. The data is as fresh as the last fetch (every 5 minutes by default); every answer states how fresh it is.
+- **No workflow content**: No JSON, no node parameters, no diff, no AI texts. Keys entered by hand in nodes therefore do not reach the agent through the workflow.
+- **Masking in messages**: Error messages and names are masked before they go to the agent: keys and tokens (named values such as `API key: …`, typical key formats, query parameters in URLs, credentials in URLs) and e-mail addresses (`j***@example.com`). In FlowVault itself you still see the full messages. Masking works with patterns; a short key without a recognisable format in the middle of free text can slip through.
+- **Tokens**: Only a SHA-256 fingerprint is stored in `data/mcp.db`. One token per agent, revocable individually, with “last used”. After 10 wrong tokens from one address, FlowVault slows that address down (like the login lock).
+- **Separate process**: Like the health service, the MCP service runs as a child process on `127.0.0.1` and is only reachable through the core’s `/mcp`. It gets no `APP_SECRET` and its own token, which the core accepts for read-only calls only. It runs in the same container under the same user; this separates interfaces, not the file system.
+
 ## AI change texts (optional)
 
 Via [Melious](https://melious.ai), a model on EU infrastructure writes a commit-style title plus bullet points for every new version. Set it up under **Settings → AI change texts**: switch it on and enter an API key; that is also where you choose the language of the texts (see [Languages](#languages)). Without an API key, nothing is sent to an AI.
@@ -261,6 +296,7 @@ server/          Node.js + Express (TypeScript, runs natively without a build)
   n8n.ts         Client for the n8n public API
   net.ts         Outgoing requests: no redirects, cloud metadata blocked
   internal.ts    Internal API for services (token) + forwarding /api/health → health service
+  mcp.ts         /mcp for agents (forwarding, lock) + management /api/mcp → MCP service
   ai.ts          AI change texts via Melious, queue, secret filter
   promote/       Environments (staging → prod)
     pairs.ts     Instance pairs and decisions to create new workflows
@@ -272,7 +308,7 @@ server/          Node.js + Express (TypeScript, runs natively without a build)
     router.ts    HTTP API of the module (/api/promote)
   db.ts          SQLite schema (node:sqlite)
   crypto.ts      Encryption, password hashing, compression
-  services.ts    Starts and supervises the health service (child process)
+  services.ts    Starts and supervises the health and MCP services (child processes)
 services/health/ Health service: executions ↔ versions, failure rates, warnings
   index.ts       HTTP API (for the core only)
   core.ts        Client for the core’s internal API
@@ -280,9 +316,18 @@ services/health/ Health service: executions ↔ versions, failure rates, warning
   analysis.ts    Pure analysis (assignment, failure rate, rollback suggestion) + tests
   evaluate.ts    Links the analysis with versions, maintains warnings
   db.ts          Own SQLite database (health.db)
+  failures.ts    Failed runs grouped and totals per instance (for the MCP service)
+services/mcp/    MCP service: read-only tools for AI agents
+  app.ts         HTTP: /mcp and management (only via the core)
+  tools.ts       Tools, fixed output fields, masking
+  verdict.ts     Verdict per instance (ok, warning, critical)
+  store.ts       On/off and token fingerprints (mcp.db)
+  core.ts        Client for the core’s internal API (read-only)
 shared/          Used by server, service and browser
   diff.ts        Workflow comparison
   executions.ts  Reduce executions, types for core, service & browser
+  redact.ts      Masking of credentials (AI texts, MCP)
+  mcp.ts         Response types of the MCP tools
   dashboard.ts   Widget IDs, storage format and validation of the dashboard
   i18n/          Languages: translator and texts (German, English)
 web/             React + Tailwind (Vite)

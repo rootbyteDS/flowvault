@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { HttpError, requestT, t } from '../../shared/i18n/server.ts';
 import { renderError } from '../../shared/i18n/index.ts';
 import { createExecutionHistoryRouter } from './history.ts';
+import { createFailuresRouter } from './failures.ts';
 
 const PORT = Number(process.env.HEALTH_PORT ?? 4100);
 const HOST = process.env.HEALTH_HOST ?? '127.0.0.1';
@@ -75,6 +76,7 @@ app.get('/v1/status', (_req, res) => {
 
 app.get('/v1/settings', (_req, res) => res.json(getSettings()));
 app.use('/v1', createExecutionHistoryRouter(db, getSettings));
+app.use('/v1', createFailuresRouter(db, getSettings));
 
 app.put('/v1/settings', (req, res) => {
   const s = saveSettings(req.body ?? {});

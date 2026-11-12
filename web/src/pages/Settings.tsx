@@ -5,6 +5,7 @@ import { api, useApi, type AiSettings, type HealthSettings, type HealthStatus } 
 import { Button, Card, ErrorBox, Field, InfoTip, PageHeader, Status, Switch, inputCls, useToast } from '../components/ui.tsx';
 import { AdminSettings } from '../components/AdminSettings.tsx';
 import { SystemSettings } from '../components/SystemSettings.tsx';
+import { McpSettings } from '../components/McpSettings.tsx';
 import { HowItWorks, explainPollError } from '../components/health.tsx';
 import { LanguageSelect } from '../components/LanguageSelect.tsx';
 import { LOCALES } from '../../../shared/i18n/index.ts';
@@ -316,6 +317,7 @@ export function SettingsPage() {
         </Card>
         <HealthCard />
         <AiCard />
+        <McpSettings />
         <AdminSettings />
         <Card className="p-6">
           <h2 className="text-base font-medium">{t('settings.how.title')}</h2>
@@ -326,6 +328,7 @@ export function SettingsPage() {
             <li>{rich('settings.how.keys', { code })}</li>
             <li>{rich('settings.how.health', { code })}</li>
             <li>{t('settings.how.ai')}</li>
+            <li>{rich('settings.how.mcp', { code })}</li>
             <li>{rich('settings.how.data', { code })}</li>
           </ul>
         </Card>

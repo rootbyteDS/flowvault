@@ -7,7 +7,7 @@ export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? 'data');
 // Datenbank (Passwort-Hash, Sitzungen, Workflows) und Schlüssel nur für den eigenen Benutzer lesbar
 process.umask(0o077);
 fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-for (const f of ['flowvault.db', 'flowvault.db-wal', 'flowvault.db-shm', 'secret.key', 'internal.token']) {
+for (const f of ['flowvault.db', 'flowvault.db-wal', 'flowvault.db-shm', 'secret.key', 'internal.token', 'mcp.token']) {
   try {
     fs.chmodSync(path.join(DATA_DIR, f), 0o600);
   } catch {}
