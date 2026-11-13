@@ -6,6 +6,8 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 ### Behoben
 
+- Beim freien Anordnen werden jetzt echte Positionen gespeichert. Widgets lassen sich gezielt in freie Spalten neben dem Ausführungsverlauf ziehen, ohne dass die automatische Sortierung sie zurücksetzt. Die Vorschau zeigt den Ablageort; überlappende Widgets weichen nach unten aus. Große und kleine Bildschirme behalten eigene Positionen. Bearbeitungsleisten liegen über den Kacheln und vergrößern sie nicht; leere Warnungen reservieren keinen Platz.
+
 - Dashboard-Widgets nutzen freie Flächen auch neben hohen Kacheln. Beispielsweise kann „Versionen“ direkt unter den kleinen Kennzahlen stehen, während rechts der Ausführungsverlauf weiterläuft. Die Platzierung passt sich an Inhalte und Größenänderungen an; freie Zwischenräume sind beim Ziehen ebenfalls als Ablageziele nutzbar.
 
 ### Hinzugefügt

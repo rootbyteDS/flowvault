@@ -624,3 +624,33 @@ test('invalid geometry writes are atomic and do not overwrite the stored arrange
     assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
   }
 });
+
+test('free widget positions persist across devices and survive older size/order/visibility writes', async () => {
+  const browser = await configured();
+  const initial = defaultDashboardLayout();
+  const positions = { wide: { workflowCount: { column: 9, top: 400 } }, narrow: { workflowCount: { column: 1, top: 800 } } };
+  const saved = await browser.patch('/dashboard/layout/geometry', { order: initial.order, sizes: initial.sizes, positions });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.positions, positions);
+  const second = new Browser();
+  await second.login();
+  assert.deepEqual((await second.request('/dashboard/layout')).body.positions, positions);
+  await second.patch('/dashboard/layout/widgets/workflowCount', { visible: false });
+  await second.patch('/dashboard/layout/order', { order: [] });
+  await second.patch('/dashboard/layout/geometry', { order: initial.order, sizes: initial.sizes });
+  await second.put('/dashboard/layout', { version: 1, widgets: {} });
+  assert.deepEqual((await browser.request('/dashboard/layout')).body.positions, positions);
+  const reset = await browser.put('/dashboard/layout', initial);
+  assert.deepEqual(reset.body.positions, { wide: {}, narrow: {} });
+});
+
+test('invalid positions cannot partially overwrite a saved geometry', async () => {
+  const browser = await configured();
+  const before = (await browser.request('/dashboard/layout')).body;
+  for (const positions of [null, {}, { wide: { workflowCount: { column: 12, top: 0 } }, narrow: {} },
+    { wide: {}, narrow: { workflowCount: { column: 1, top: -1 } } },
+    { wide: { unknown: { column: 1, top: 400 } }, narrow: {} }]) {
+    assert.equal((await browser.patch('/dashboard/layout/geometry', { order: [], sizes: {}, positions })).status, 400);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
+  }
+});

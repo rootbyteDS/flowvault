@@ -84,11 +84,11 @@ export function WidgetResizeHandle({ id, size, content, grid, disabled, onChange
       : resizeWidget(size, dx, dy, 1, content.current?.getBoundingClientRect().height ?? 240);
     onChange(next); announce(next);
   }
-  const buttonClass = 'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-panel-3 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-30';
-  return <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-    <span className="mr-auto text-[11px] text-dim">{summary(size)}</span>
-    {size.height !== null && <button type="button" disabled={disabled} className="rounded px-1 text-xs text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
-      onClick={() => { const next = { ...size, height: null }; onChange(next); announce(next); }}>{t('dashboard.arrange.autoHeight')}</button>}
+  const buttonClass = 'inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-panel-3 hover:text-text focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-30';
+  return <div className="absolute inset-x-0 bottom-0 z-10 flex h-8 items-center justify-end gap-1 rounded-b-xl bg-panel-2 px-2">
+    <span className="mr-auto min-w-0 truncate text-[10px] text-dim" title={summary(size)}>{size.columns}/12 · {size.height === null ? t('dashboard.arrange.autoHeight') : `${size.height} px`}</span>
+    {size.height !== null && <button type="button" disabled={disabled} className={buttonClass} aria-label={`${name}: ${t('dashboard.arrange.autoHeight')}`}
+      title={t('dashboard.arrange.autoHeight')} onClick={() => { const next = { ...size, height: null }; onChange(next); announce(next); }}>↕</button>}
     <button type="button" disabled={disabled} className={buttonClass} title={t('dashboard.arrange.resetSize', { name })}
       aria-label={t('dashboard.arrange.resetSize', { name })} onClick={() => { const next = defaultWidgetSize(id); onChange(next); announce(next); }}><RotateCcw className="size-4" /></button>
     <button type="button" disabled={disabled} className={`${buttonClass} touch-none cursor-nwse-resize select-none`}

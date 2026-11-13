@@ -5,11 +5,13 @@ der Ausführungsverlauf, die letzten Änderungen, die Instanzenübersicht sowie 
 ein- und ausblenden. Die Auswahl wird erst mit **Speichern** übernommen.
 **Standard wiederherstellen** setzt die Auswahl im Dialog zurück; anschließend speichern.
 
-Über **Widgets anordnen** lässt sich die Reihenfolge direkt auf dem Dashboard
-ändern. Widgets am Griff auf ein anderes Widget ziehen und dort loslassen. Das
+Über **Widgets anordnen** lassen sich Widgets direkt auf dem Dashboard
+platzieren. Widgets am Griff an die gewünschte freie Stelle ziehen und dort loslassen. Das
 funktioniert mit Maus, Stift und Touch; beim Ziehen am Bildschirmrand scrollt die
-Seite mit. Alternativ verschieben die Pfeilknöpfe ein Widget nach vorne bzw.
-hinten. Am fokussierten Griff funktionieren die Pfeiltasten sowie Pos1 und Ende.
+Seite mit. Die Vorschau zeigt die genaue Ablageposition. Alternativ verschieben
+die Pfeilknöpfe ein Widget um 20 Pixel nach oben bzw. unten. Am fokussierten Griff
+bewegen Links/Rechts es spaltenweise und Oben/Unten um 20 Pixel. Pos1 setzt es
+nach links oben, Ende nach rechts unter die übrigen Widgets.
 Die Änderung wird erst mit **Speichern** serverseitig übernommen. **Abbrechen**
 verwirft den Entwurf, auch nach mehreren Verschiebungen. Bei einem Speicherfehler
 bleibt der Entwurf mit Fehlermeldung erhalten und kann erneut gespeichert werden.
@@ -28,25 +30,32 @@ wächst. Breite und Höhe stehen während der Bearbeitung direkt am Widget.
 Größen und Reihenfolge werden mit **Speichern** gemeinsam übernommen; Abbrechen
 verwirft beide Entwürfe. Größen ausgeblendeter Widgets bleiben erhalten.
 
-Die kompakte Platzierung bricht die Widgets je nach Bildschirmbreite um. Auf großen
+Große und kleine Bildschirme behalten getrennte Positionen. So kann ein auf einem
+großen Bildschirm rechts neben dem Ausführungsverlauf abgelegtes „Workflows“-Widget
+dort bleiben, auch wenn das Dashboard zwischenzeitlich am Handy angepasst wurde.
+Frei gelassene Bereiche bleiben erhalten. Beim Ablegen in einem belegten Bereich
+behält die bewegte Kachel ihren Zielplatz; betroffene Kacheln weichen nach unten
+aus. Breitenänderungen und wachsende Inhalte werden ebenfalls ohne Überlappung
+aufgelöst. Die Bearbeitungsleisten liegen über dem Inhalt und verändern weder
+Kachelhöhen noch die gespeicherten Abstände. Während des Anordnens sind die
+eigentlichen Widget-Inhalte nicht interaktiv.
+
+Ohne gespeicherte Positionen werden die Widgets zunächst kompakt angeordnet. Auf großen
 Bildschirmen sind Kennzahlen kompakt, die beiden Verlaufswidgets jeweils eine
 halbe Zeile breit; die letzten Änderungen und Instanzenübersicht teilen sich
-standardmäßig eine Zeile. Kleine Widgets nutzen freie Flächen unter anderen
+standardmäßig eine Zeile. Kleine Widgets nutzen dabei freie Flächen unter anderen
 kurzen Widgets, auch wenn daneben eine hohe Kachel steht. Beispielsweise kann
 „Versionen“ unter „Instanzen“ nachrücken, ohne auf das Ende des Ausführungsverlaufs
-zu warten. Die gespeicherte Reihenfolge bestimmt die Priorität beim Platzieren;
-Nachrücken kann eine spätere Kachel oberhalb einer früheren platzieren. Die
-DOM- und Tastaturreihenfolge bleibt die gespeicherte Reihenfolge. Zwischenräume
-im Dashboard sind beim Ziehen ebenfalls nutzbar; das nächste Ziel wird markiert.
-Einträge bleiben über die bisherigen Bereiche hinweg verschiebbar.
-Ein Warnungswidget ohne Warnungen ist im Anordnen-Modus über seine beschriftete
-Leiste erreichbar; sonst nimmt es keinen Platz ein.
+zu warten. Sobald eine Anordnung gespeichert wird, sind die tatsächlichen
+Spalten und Abstände maßgeblich. Die Lese- und Tastaturreihenfolge wird anhand
+der sichtbaren Positionen aktualisiert. Ein Warnungswidget ohne Warnungen ist
+auch im Anordnen-Modus unsichtbar und nimmt keinen Platz ein.
 
 Ausgeblendete Widgets bleiben in der gespeicherten Reihenfolge und erscheinen
 beim Wiedereinblenden wieder an ihrer Position. **Standardlayout** im
-Anordnen-Modus setzt Reihenfolge und Größen des Entwurfs zurück. **Standard
+Anordnen-Modus setzt Reihenfolge, Größen und Positionen des Entwurfs zurück. **Standard
 wiederherstellen** unter **Dashboard anpassen** setzt sowohl Sichtbarkeit als
-auch Reihenfolge und Größen zurück. Beide Änderungen müssen anschließend gespeichert werden.
+auch Reihenfolge, Größen und Positionen zurück. Beide Änderungen müssen anschließend gespeichert werden.
 
 Alle Widget-Kopfzeilen verwenden dieselben Namen wie die Auswahl unter
 **Dashboard anpassen**. Beispielsweise heißt die Instanzenliste überall
@@ -78,7 +87,8 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
 - `web/src/components/dashboard/DashboardGrid.tsx`: responsives Raster, Ziehen
   per Pointer Events, Scrollen am Bildschirmrand und Tastatur-/Pfeilbedienung.
 - `web/src/dashboard-packing.ts`: kompakte, kollisionsfreie Platzierung aus
-  gespeicherter Reihenfolge, Rasterbreite und gemessenen Widget-Höhen.
+  gespeicherten Positionen, Rasterbreite und gemessenen Widget-Höhen. Ohne manuelle
+  Koordinaten dient die Reihenfolge als Vorgabe für eine kompakte Anfangsansicht.
 - `web/src/components/dashboard/useDashboardPacking.ts`: misst Karten per
   `ResizeObserver`, einschließlich Bearbeitungsleisten und dynamischer Inhalte.
   So werden Größenänderungen, geladene Daten und geöffnete Einstellungen
@@ -101,7 +111,7 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
 - `server/dashboard.ts`: `GET /api/dashboard/layout` und `PUT /api/dashboard/layout`,
   sowie `PATCH /api/dashboard/layout/widgets/:id` für die Sichtbarkeit eines
   einzelnen Widgets und `PATCH /api/dashboard/layout/order` für die Reihenfolge.
-  `PATCH /api/dashboard/layout/geometry` speichert Reihenfolge und Größen zusammen.
+  `PATCH /api/dashboard/layout/geometry` speichert Reihenfolge, Größen und Positionen zusammen.
   Die Teilaktualisierungen verändern die jeweils anderen Einstellungen nicht.
   Alle liegen hinter Anmeldung und JSON-/CSRF-Schutz des Cores.
 
@@ -111,11 +121,28 @@ im bestehenden Layout gespeichert; alte Einstellungen bekommen die Standardfolge
 Neue Widgets werden an vorhandene Reihenfolgen angehängt, unbekannte und doppelte
 IDs beim Lesen bereinigt. Schreibzugriffe mit unbekannten oder doppelten IDs werden
 abgelehnt. Alte Clients ohne `order` können ihre Sichtbarkeit weiterhin speichern,
-ohne die neuere Reihenfolge oder Größen zurückzusetzen. Größen liegen unter
+ohne die neuere Reihenfolge, Größen oder Positionen zurückzusetzen. Größen liegen unter
 `sizes` im Layout; jede ID hat `columns` und `height` (null bedeutet automatische
 Höhe). Alte Speicherstände bekommen Standardgrößen, beschädigte Einzelgrößen
 werden auf ihre Vorgaben zurückgesetzt. Ungültige Größen in Schreibzugriffen
 werden abgelehnt, ohne Teile der Anordnung zu speichern.
+
+`positions` enthält getrennte Zuordnungen `wide` und `narrow`. Eine Widget-ID hat
+jeweils `{ column, top }`: nullbasierte Rasterspalte und Abstand vom oberen Rand
+des Dashboards in Pixeln. Beim Ziehen rasten Spalten und 20-Pixel-Schritte ein.
+Alte Speicherstände starten ohne explizite Positionen; ältere Schreibzugriffe,
+die dieses Feld nicht kennen, erhalten die vorhandenen Koordinaten.
+
+## Browser-Regressionsprüfung
+
+`npm run test:dashboard-browser` baut die echte Dashboard-Komponente mit lokalen
+Beispieldaten und prüft sie ohne Webserver in einem isolierten Chromium-Profil:
+freier Ablageort neben dem Ausführungsverlauf, Vorschau, gleiche Kachelgrößen beim
+Anordnen, Speichern und Neuladen, Touch-Verschiebung, Tastatur und Abbrechen.
+Produktive Konten oder Daten werden nicht angesprochen. Der Test ist auch Teil
+von `npm test`. Ohne vorhandenes Chromium wird er mit Begründung übersprungen;
+`DASHBOARD_BROWSER_BIN` kann auf ein installiertes Chromium bzw. Headless Shell
+gesetzt werden. Ein vorhandener Playwright-Cache auf macOS wird automatisch erkannt.
 Für mehrere Benutzer muss die Speicherung an eine stabile Benutzer-ID gebunden
 werden. Ein eigener Microservice ist für dieses Widget-System nicht erforderlich.
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { WIDGET_IDS, defaultDashboardLayout, defaultWidgetSize, isDashboardLayoutInput, isWidgetOrder, isWidgetSize, moveWidget, normalizeDashboardLayout, normalizeWidgetOrder, resizeWidget } from './dashboard.ts';
+import { WIDGET_IDS, defaultDashboardLayout, defaultWidgetSize, isDashboardLayoutInput, isWidgetOrder, isWidgetPositions, isWidgetSize, moveWidget, normalizeDashboardLayout, normalizeWidgetOrder, resizeWidget } from './dashboard.ts';
 
 test('older visibility-only layouts keep their settings and receive a complete default order', () => {
   const migrated = normalizeDashboardLayout({ version: 1, widgets: { executions: { visible: false } } });
@@ -72,5 +72,27 @@ test('invalid widget sizes cannot be written', () => {
     { columns: 6, height: 250.5 }, { columns: 6, height: null, extra: true }]) {
     assert.equal(isWidgetSize(size), false);
     assert.equal(isDashboardLayoutInput({ ...defaultDashboardLayout(), sizes: { history: size } }), false);
+  }
+});
+
+test('explicit coordinates migrate independently for wide and narrow screens', () => {
+  assert.deepEqual(normalizeDashboardLayout({ version: 1, widgets: {} }).positions, { wide: {}, narrow: {} });
+  const result = normalizeDashboardLayout({ version: 1, widgets: {}, positions: {
+    wide: { workflowCount: { column: 9, top: 400 }, retired: { column: 0, top: 0 } },
+    narrow: { workflowCount: { column: 1, top: 800 }, instances: { column: 2, top: -1 } },
+  } });
+  assert.deepEqual(result.positions, { wide: { workflowCount: { column: 9, top: 400 } }, narrow: { workflowCount: { column: 1, top: 800 } } });
+});
+
+test('position writes reject unsafe, duplicate-mode or out-of-bounds data', () => {
+  assert.equal(isWidgetPositions({ wide: { workflowCount: { column: 9, top: 400 } }, narrow: {} }), true);
+  for (const positions of [null, {}, { wide: {}, narrow: {}, extra: {} }, { wide: [], narrow: {} },
+    { wide: { unknown: { column: 1, top: 0 } }, narrow: {} },
+    { wide: { workflowCount: { column: 12, top: 0 } }, narrow: {} },
+    { wide: {}, narrow: { workflowCount: { column: 2, top: 0 } } },
+    ...[-1, 0.5, 1000001].map((top) => ({ wide: { workflowCount: { column: 1, top } }, narrow: {} })),
+    { wide: { workflowCount: { column: '1', top: 0 } }, narrow: {} }]) {
+    assert.equal(isWidgetPositions(positions), false);
+    assert.equal(isDashboardLayoutInput({ ...defaultDashboardLayout(), positions }), false);
   }
 });

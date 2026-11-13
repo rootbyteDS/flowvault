@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { WIDGET_IDS } from '../../shared/dashboard.ts';
-import { nearestPackedWidget, packDashboard, type PackedWidget, type PackingItem } from './dashboard-packing.ts';
+import { orderByPlacement, packDashboard, snapshotPositions, snapWidgetPosition, type PackedWidget, type PackingItem } from './dashboard-packing.ts';
 
 function noOverlap(items: PackedWidget[], width: number, gap: number) {
   for (const [i, a] of items.entries()) {
@@ -69,12 +69,44 @@ test('mixed sizes and heights never overlap and placement is deterministic', () 
   }
 });
 
-test('free-space drops resolve to a nearby widget instead of doing nothing', () => {
-  const { items } = packDashboard([
-    { id: 'instanceCount', columns: 6, height: 200 }, { id: 'executions', columns: 6, height: 900 },
-    { id: 'versionCount', columns: 6, height: 140 },
-  ], 1000, 12, 24);
-  assert.equal(nearestPackedWidget(items, 30, 210, 'executions'), 'instanceCount');
-  assert.equal(nearestPackedWidget(items, 30, 260, 'executions'), 'versionCount');
-  assert.equal(nearestPackedWidget([], 0, 0, 'executions'), null);
+test('screenshot regression: Workflows stays in the exact free column beside execution history after saving', () => {
+  const items: PackingItem[] = [
+    { id: 'instanceCount', columns: 3, height: 200 }, { id: 'workflowCount', columns: 3, height: 200 },
+    { id: 'versionCount', columns: 3, height: 200 }, { id: 'executions', columns: 6, height: 900 },
+  ];
+  const base = { instanceCount: { column: 6, top: 0 }, workflowCount: { column: 9, top: 0 },
+    versionCount: { column: 0, top: 400 }, executions: { column: 3, top: 400 } };
+  const destination = snapWidgetPosition(9 * 102, 407, 1200, 12, 3, 24);
+  assert.deepEqual(destination, { column: 9, top: 400 });
+  const result = packDashboard(items, 1200, 12, 24, { ...base, workflowCount: destination }, 'workflowCount');
+  const workflow = result.items.find((r) => r.id === 'workflowCount')!;
+  assert.equal(workflow.column, 9);
+  assert.equal(workflow.top, 400);
+  assert.equal(result.items.find((r) => r.id === 'executions')!.top, 400);
+  const saved = JSON.parse(JSON.stringify(snapshotPositions(result.items)));
+  assert.deepEqual(packDashboard(items, 1200, 12, 24, saved), result);
+  noOverlap(result.items, 1200, 24);
+});
+
+test('overlapping drops keep the moved widget at its target and push the obstruction down', () => {
+  const items: PackingItem[] = [{ id: 'executions', columns: 6, height: 900 }, { id: 'workflowCount', columns: 3, height: 200 }];
+  const result = packDashboard(items, 1200, 12, 24, { executions: { column: 3, top: 400 }, workflowCount: { column: 3, top: 400 } }, 'workflowCount');
+  assert.equal(result.items.find((r) => r.id === 'workflowCount')!.top, 400);
+  assert.equal(result.items.find((r) => r.id === 'executions')!.top, 624);
+  noOverlap(result.items, 1200, 24);
+});
+
+test('snapshot retains hidden coordinates and visual order retains all IDs', () => {
+  const layout = packDashboard([{ id: 'instanceCount', columns: 3, height: 200 }, { id: 'workflowCount', columns: 3, height: 200 }],
+    1200, 12, 24, { instanceCount: { column: 6, top: 400 }, workflowCount: { column: 9, top: 0 } });
+  assert.deepEqual(snapshotPositions(layout.items, { health: { column: 0, top: 1000 } }).health, { column: 0, top: 1000 });
+  const order = orderByPlacement([...WIDGET_IDS], layout.items);
+  assert.deepEqual(new Set(order), new Set(WIDGET_IDS));
+  assert.ok(order.indexOf('workflowCount') < order.indexOf('instanceCount'));
+});
+
+test('drop coordinates clamp to the available width and snap vertical movement', () => {
+  assert.deepEqual(snapWidgetPosition(-100, -100, 1200, 12, 3, 24), { column: 0, top: 0 });
+  assert.deepEqual(snapWidgetPosition(9999, 99999, 1200, 12, 6, 24), { column: 6, top: 20000 });
+  assert.deepEqual(snapWidgetPosition(310, 211, 320, 2, 1, 16), { column: 1, top: 220 });
 });
