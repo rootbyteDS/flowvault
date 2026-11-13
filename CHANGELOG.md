@@ -4,7 +4,13 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 ## [Unreleased]
 
+### Behoben
+
+- Dashboard-Widgets nutzen freie Flächen auch neben hohen Kacheln. Beispielsweise kann „Versionen“ direkt unter den kleinen Kennzahlen stehen, während rechts der Ausführungsverlauf weiterläuft. Die Platzierung passt sich an Inhalte und Größenänderungen an; freie Zwischenräume sind beim Ziehen ebenfalls als Ablageziele nutzbar.
+
 ### Hinzugefügt
+
+- Dashboard-Widgets lassen sich im Anordnen-Modus am Griff unten rechts in Breite und Höhe vergrößern und verkleinern, auch per Touch oder Tastatur. Größen und Reihenfolge werden gemeinsam für das Admin-Konto gespeichert. Automatische Höhe und Standardgrößen lassen sich jederzeit wiederherstellen; bei kleiner Höhe bleiben die Inhalte scrollbar.
 
 - Zugang für KI-Agents über MCP (Model Context Protocol): Claude, ChatGPT, Cursor und andere Clients fragen unter `/mcp` nur lesend, wie es den n8n-Instanzen geht. Sechs Tools liefern ein Urteil je Instanz mit Gründen, Fehlläufe gruppiert nach Workflow, Node und Meldung, offene Warnungen, die Fehlerquote je Version, letzte Änderungen und die gesicherten Workflows. Einschalten und Tokens pro Agent anlegen unter **Einstellungen → Zugang für KI-Agents (MCP)**; Tokens lassen sich auf Instanzen beschränken und einzeln widerrufen. Der Zugang ist standardmäßig aus. Der MCP-Dienst läuft wie der Health-Dienst als eigener Prozess (`MCP_PORT`, Standard 4200, nur `127.0.0.1`).
 

@@ -14,19 +14,39 @@ Die Änderung wird erst mit **Speichern** serverseitig übernommen. **Abbrechen*
 verwirft den Entwurf, auch nach mehreren Verschiebungen. Bei einem Speicherfehler
 bleibt der Entwurf mit Fehlermeldung erhalten und kann erneut gespeichert werden.
 
-Das gemeinsame Raster bricht die Widgets je nach Bildschirmbreite um. Auf großen
+Im gleichen Modus ändert der **Griff unten rechts** die Größe eines Widgets:
+nach rechts oder links ziehen für die Breite, nach unten oder oben für die Höhe.
+Die Breite rastet zwischen 3 und 12 Rasterspalten ein; die Höhe zwischen 140 und
+1600 Pixeln in 20-Pixel-Schritten. Auf schmalen Bildschirmen werden Breiten passend
+umgebrochen. Beim Vergrößern am Bildschirmrand scrollt die Seite mit. Reicht die
+eingestellte Höhe nicht für den Inhalt, lässt dieser sich im Widget scrollen.
+
+Am fokussierten Größen-Griff ändern Links/Rechts die Breite und Oben/Unten die
+Höhe. Pos1 bzw. der Zurücksetzen-Knopf stellt die Standardgröße des Widgets wieder
+her. **Automatisch** setzt nur die Höhe zurück, sodass sie wieder mit dem Inhalt
+wächst. Breite und Höhe stehen während der Bearbeitung direkt am Widget.
+Größen und Reihenfolge werden mit **Speichern** gemeinsam übernommen; Abbrechen
+verwirft beide Entwürfe. Größen ausgeblendeter Widgets bleiben erhalten.
+
+Die kompakte Platzierung bricht die Widgets je nach Bildschirmbreite um. Auf großen
 Bildschirmen sind Kennzahlen kompakt, die beiden Verlaufswidgets jeweils eine
 halbe Zeile breit; die letzten Änderungen und Instanzenübersicht teilen sich
-standardmäßig eine Zeile. Die Reihenfolge gilt über diese früher getrennten
-Bereiche hinweg und entspricht auch auf kleinen Bildschirmen der Lesereihenfolge.
+standardmäßig eine Zeile. Kleine Widgets nutzen freie Flächen unter anderen
+kurzen Widgets, auch wenn daneben eine hohe Kachel steht. Beispielsweise kann
+„Versionen“ unter „Instanzen“ nachrücken, ohne auf das Ende des Ausführungsverlaufs
+zu warten. Die gespeicherte Reihenfolge bestimmt die Priorität beim Platzieren;
+Nachrücken kann eine spätere Kachel oberhalb einer früheren platzieren. Die
+DOM- und Tastaturreihenfolge bleibt die gespeicherte Reihenfolge. Zwischenräume
+im Dashboard sind beim Ziehen ebenfalls nutzbar; das nächste Ziel wird markiert.
+Einträge bleiben über die bisherigen Bereiche hinweg verschiebbar.
 Ein Warnungswidget ohne Warnungen ist im Anordnen-Modus über seine beschriftete
 Leiste erreichbar; sonst nimmt es keinen Platz ein.
 
 Ausgeblendete Widgets bleiben in der gespeicherten Reihenfolge und erscheinen
-beim Wiedereinblenden wieder an ihrer Position. **Standardreihenfolge** im
-Anordnen-Modus setzt nur die Reihenfolge des Entwurfs zurück. **Standard
+beim Wiedereinblenden wieder an ihrer Position. **Standardlayout** im
+Anordnen-Modus setzt Reihenfolge und Größen des Entwurfs zurück. **Standard
 wiederherstellen** unter **Dashboard anpassen** setzt sowohl Sichtbarkeit als
-auch Reihenfolge zurück. Beide Änderungen müssen anschließend gespeichert werden.
+auch Reihenfolge und Größen zurück. Beide Änderungen müssen anschließend gespeichert werden.
 
 Alle Widget-Kopfzeilen verwenden dieselben Namen wie die Auswahl unter
 **Dashboard anpassen**. Beispielsweise heißt die Instanzenliste überall
@@ -57,8 +77,17 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
   neuer Widgets. Beschädigte Einstellungen fallen auf die Standardansicht zurück.
 - `web/src/components/dashboard/DashboardGrid.tsx`: responsives Raster, Ziehen
   per Pointer Events, Scrollen am Bildschirmrand und Tastatur-/Pfeilbedienung.
+- `web/src/dashboard-packing.ts`: kompakte, kollisionsfreie Platzierung aus
+  gespeicherter Reihenfolge, Rasterbreite und gemessenen Widget-Höhen.
+- `web/src/components/dashboard/useDashboardPacking.ts`: misst Karten per
+  `ResizeObserver`, einschließlich Bearbeitungsleisten und dynamischer Inhalte.
+  So werden Größenänderungen, geladene Daten und geöffnete Einstellungen
+  berücksichtigt. Die äußere Höhe folgt dem tiefsten Widget; unsichtbare Warnungen
+  belegen keinen Platz.
+- `web/src/components/dashboard/WidgetResizeHandle.tsx`: Größen-Griff mit
+  Rastereinrasten, automatischer Höhe, Standardgröße und Tastaturbedienung.
 - `web/src/components/dashboard/widgets.tsx`: Widget-Komponenten und Registrierung
-  mit ID und Standardbreite im Raster. Die Titel in `web/src/widget-titles.ts` werden von
+  mit ID. Die Standardgrößen liegen in `shared/dashboard.ts`. Die Titel in `web/src/widget-titles.ts` werden von
   Kopfzeile und Sichtbarkeitsauswahl gemeinsam verwendet. Deaktivierte Komponenten werden
   nicht eingebunden; beispielsweise ruft ein ausgeblendetes Health-Widget seine
   Warnungen nicht mehr ab.
@@ -72,6 +101,7 @@ Zeitraumwahl des Änderungsverlaufs bleibt eine separate Einstellung dieses Brow
 - `server/dashboard.ts`: `GET /api/dashboard/layout` und `PUT /api/dashboard/layout`,
   sowie `PATCH /api/dashboard/layout/widgets/:id` für die Sichtbarkeit eines
   einzelnen Widgets und `PATCH /api/dashboard/layout/order` für die Reihenfolge.
+  `PATCH /api/dashboard/layout/geometry` speichert Reihenfolge und Größen zusammen.
   Die Teilaktualisierungen verändern die jeweils anderen Einstellungen nicht.
   Alle liegen hinter Anmeldung und JSON-/CSRF-Schutz des Cores.
 
@@ -81,8 +111,11 @@ im bestehenden Layout gespeichert; alte Einstellungen bekommen die Standardfolge
 Neue Widgets werden an vorhandene Reihenfolgen angehängt, unbekannte und doppelte
 IDs beim Lesen bereinigt. Schreibzugriffe mit unbekannten oder doppelten IDs werden
 abgelehnt. Alte Clients ohne `order` können ihre Sichtbarkeit weiterhin speichern,
-ohne die neuere Reihenfolge zurückzusetzen. Die Widget-Größen sind weiterhin
-vorgegeben; zusätzliche Einstellungen können im versionierten Layout ergänzt werden.
+ohne die neuere Reihenfolge oder Größen zurückzusetzen. Größen liegen unter
+`sizes` im Layout; jede ID hat `columns` und `height` (null bedeutet automatische
+Höhe). Alte Speicherstände bekommen Standardgrößen, beschädigte Einzelgrößen
+werden auf ihre Vorgaben zurückgesetzt. Ungültige Größen in Schreibzugriffen
+werden abgelehnt, ohne Teile der Anordnung zu speichern.
 Für mehrere Benutzer muss die Speicherung an eine stabile Benutzer-ID gebunden
 werden. Ein eigener Microservice ist für dieses Widget-System nicht erforderlich.
 

@@ -1,6 +1,6 @@
 {
   "name": "flowvault",
-  "version": "0.3.7",
+  "version": "0.3.9",
   "private": true,
   "license": "MIT",
   "description": "Versionierung & Backup für n8n-Workflows – wie GitHub, nur für n8n.",
@@ -16,7 +16,7 @@
     "dev": "concurrently -n api,web -c magenta,cyan \"node --watch-path=server --watch-path=services --watch-path=shared server/index.ts\" \"vite\"",
     "build": "vite build && node scripts/build-info.ts",
     "start": "NODE_ENV=production node server/index.ts",
-    "test": "node --test scripts/version.test.ts scripts/changelog.test.ts shared/i18n/i18n.test.ts shared/dashboard.test.ts shared/redact.test.ts server/auth.test.ts server/ai.test.ts server/updates.test.ts server/snapshots.test.ts server/internal.test.ts server/promote/transform.test.ts server/promote/promote.test.ts services/health/analysis.test.ts services/health/history.test.ts services/health/failures.test.ts services/mcp/verdict.test.ts services/mcp/mcp.test.ts web/src/heatmap.test.ts web/src/execution-history.test.ts",
+    "test": "node --test scripts/version.test.ts scripts/changelog.test.ts shared/i18n/i18n.test.ts shared/dashboard.test.ts shared/redact.test.ts server/auth.test.ts server/ai.test.ts server/updates.test.ts server/snapshots.test.ts server/internal.test.ts server/promote/transform.test.ts server/promote/promote.test.ts services/health/analysis.test.ts services/health/history.test.ts services/health/failures.test.ts services/mcp/verdict.test.ts services/mcp/mcp.test.ts web/src/heatmap.test.ts web/src/execution-history.test.ts web/src/dashboard-packing.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "mock-n8n": "node scripts/mock-n8n.ts"
   },

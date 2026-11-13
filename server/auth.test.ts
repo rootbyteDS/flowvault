@@ -462,12 +462,14 @@ test('dashboard preferences require a full session for reads and writes', async 
   assert.equal((await anonymous.request('/dashboard/layout')).status, 401);
   assert.equal((await anonymous.put('/dashboard/layout', defaultDashboardLayout())).status, 401);
   assert.equal((await anonymous.patch('/dashboard/layout/order', { order: [] })).status, 401);
+  assert.equal((await anonymous.patch('/dashboard/layout/geometry', { order: [], sizes: {} })).status, 401);
   await enabled();
   const pending = new Browser();
   assert.equal((await pending.login()).body.twoFactorRequired, true);
   assert.equal((await pending.request('/dashboard/layout')).status, 401);
   assert.equal((await pending.put('/dashboard/layout', defaultDashboardLayout())).status, 401);
   assert.equal((await pending.patch('/dashboard/layout/order', { order: [] })).status, 401);
+  assert.equal((await pending.patch('/dashboard/layout/geometry', { order: [], sizes: {} })).status, 401);
 });
 
 test('dashboard defaults, hidden widgets and reset persist across admin sessions', async () => {
@@ -583,4 +585,42 @@ test('invalid order writes preserve the saved layout; partial orders append miss
   assert.equal(response.status, 200);
   assert.deepEqual(response.body.order, ['instances', ...before.order.filter((id: string) => id !== 'instances')]);
   assert.deepEqual(JSON.parse(getSetting('admin_dashboard_layout')!).order, response.body.order);
+});
+
+test('widget resizing persists together with order and survives visibility changes and legacy clients', async () => {
+  const browser = await configured();
+  const order = [...defaultDashboardLayout().order].reverse();
+  await browser.patch('/dashboard/layout/widgets/instances', { visible: false });
+  const changed = await browser.patch('/dashboard/layout/geometry', { order, sizes: { history: { columns: 12, height: 400 } } });
+  assert.equal(changed.status, 200);
+  assert.deepEqual(changed.body.order, order);
+  assert.deepEqual(changed.body.sizes.history, { columns: 12, height: 400 });
+  assert.equal(changed.body.widgets.instances.visible, false);
+  assert.deepEqual(changed.body.sizes.executions, { columns: 6, height: null });
+  const other = new Browser();
+  await other.login();
+  assert.deepEqual((await other.request('/dashboard/layout')).body, changed.body);
+  await other.patch('/dashboard/layout/widgets/history', { visible: false });
+  await other.patch('/dashboard/layout/widgets/history', { visible: true });
+  assert.deepEqual((await browser.request('/dashboard/layout')).body.sizes.history, { columns: 12, height: 400 });
+  const legacy = await browser.put('/dashboard/layout', { version: 1, widgets: {} });
+  assert.deepEqual(legacy.body.sizes, changed.body.sizes);
+  await browser.patch('/dashboard/layout/order', { order: [] });
+  assert.deepEqual((await browser.request('/dashboard/layout')).body.sizes, changed.body.sizes);
+  const reset = await browser.put('/dashboard/layout', defaultDashboardLayout());
+  assert.deepEqual(reset.body, defaultDashboardLayout());
+});
+
+test('invalid geometry writes are atomic and do not overwrite the stored arrangement', async () => {
+  const browser = await configured();
+  const before = (await browser.request('/dashboard/layout')).body;
+  for (const body of [null, {}, { order: [] }, { order: [], sizes: null }, { order: [], sizes: [] },
+    { order: [], sizes: { unknown: { columns: 6, height: null } } },
+    { order: [], sizes: { history: { columns: 0, height: 300 } } },
+    { order: [], sizes: { history: { columns: 6, height: -1 } } },
+    { order: [], sizes: { history: { columns: 6, height: 999999 } } },
+    { order: ['history', 'history'], sizes: {} }, { order: [], sizes: {}, extra: true }]) {
+    assert.equal((await browser.patch('/dashboard/layout/geometry', body)).status, 400);
+    assert.deepEqual((await browser.request('/dashboard/layout')).body, before);
+  }
 });

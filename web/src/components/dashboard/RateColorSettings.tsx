@@ -19,7 +19,7 @@ export function RateColorSettings({ thresholds, onChange }: { thresholds: RateTh
   return <fieldset className="space-y-3 border-t border-line pt-3">
     <legend className="text-sm font-medium">{t('dashboard.executions.colorLimits')}</legend>
     <p id={`${id}-hint`} className="text-xs text-dim">{t('dashboard.executions.colorHint')}</p>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))' }}>
       {labels.map((label, i) => <Field key={label} label={t(label)}>
         <div className="flex items-center gap-2">
           <span aria-hidden className={`size-3 shrink-0 rounded-[2px] ${colors[i]}`} />

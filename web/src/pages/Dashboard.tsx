@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { GripVertical, LayoutDashboard, Plus, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
-import { defaultDashboardLayout, type DashboardLayout, type WidgetId } from '../../../shared/dashboard.ts';
+import { defaultDashboardLayout, type DashboardLayout, type WidgetId, type WidgetSizes } from '../../../shared/dashboard.ts';
 import { api, useApi, type Instance, type Overview } from '../api.ts';
 import { CustomizeDashboard } from '../components/dashboard/CustomizeDashboard.tsx';
 import { DashboardGrid } from '../components/dashboard/DashboardGrid.tsx';
@@ -20,6 +20,7 @@ export function Dashboard() {
   const [hiding, setHiding] = useState(false);
   const hideInFlight = useRef(false);
   const [draftOrder, setDraftOrder] = useState<WidgetId[] | null>(null);
+  const [draftSizes, setDraftSizes] = useState<WidgetSizes | null>(null);
   const [savingOrder, setSavingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string>();
   const orderInFlight = useRef(false);
@@ -44,14 +45,15 @@ export function Dashboard() {
   }
 
   async function saveOrder() {
-    if (!draftOrder || orderInFlight.current) return;
+    if (!draftOrder || !draftSizes || orderInFlight.current) return;
     orderInFlight.current = true;
     setSavingOrder(true);
     setOrderError(undefined);
     try {
-      const saved = await api<DashboardLayout>('/dashboard/layout/order', { method: 'PATCH', body: { order: draftOrder } });
+      const saved = await api<DashboardLayout>('/dashboard/layout/geometry', { method: 'PATCH', body: { order: draftOrder, sizes: draftSizes } });
       layout.setData(saved);
       setDraftOrder(null);
+      setDraftSizes(null);
       toast(t('dashboard.arrange.saved'));
     } catch (error) {
       setOrderError((error as Error).message);
@@ -110,8 +112,8 @@ export function Dashboard() {
         actions={
           <>
             {customizeButton}
-            <Button icon={<GripVertical className="size-4" />} disabled={!layout.data || hiding || arranging || visible.length < 2}
-              onClick={() => { setDraftOrder([...settings.order]); setOrderError(undefined); }}>{t('dashboard.arrange.title')}</Button>
+            <Button icon={<GripVertical className="size-4" />} disabled={!layout.data || hiding || arranging || visible.length === 0}
+              onClick={() => { setDraftOrder([...settings.order]); setDraftSizes(structuredClone(settings.sizes)); setOrderError(undefined); }}>{t('dashboard.arrange.title')}</Button>
             <Button icon={<Plus className="size-4" />} onClick={() => setShowForm(true)}>{t('dashboard.addInstance')}</Button>
             <Button variant="primary" icon={<RefreshCw className={cx('size-4', syncing && 'animate-spin')} />} onClick={syncAll} disabled={syncing}>
               {t('dashboard.syncAll')}
@@ -128,17 +130,19 @@ export function Dashboard() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm font-medium">{t('dashboard.arrange.title')}</span>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={savingOrder} onClick={() => setDraftOrder(defaultDashboardLayout().order)}>{t('dashboard.arrange.reset')}</Button>
-            <Button size="sm" disabled={savingOrder} onClick={() => { setDraftOrder(null); setOrderError(undefined); }}>{t('common.cancel')}</Button>
+            <Button size="sm" disabled={savingOrder} onClick={() => { const defaults = defaultDashboardLayout(); setDraftOrder(defaults.order); setDraftSizes(defaults.sizes); }}>{t('dashboard.arrange.reset')}</Button>
+            <Button size="sm" disabled={savingOrder} onClick={() => { setDraftOrder(null); setDraftSizes(null); setOrderError(undefined); }}>{t('common.cancel')}</Button>
             <Button size="sm" variant="primary" loading={savingOrder} onClick={() => void saveOrder()}>{t('common.save')}</Button>
           </div>
         </div>
         {orderError && <div className="mt-3"><ErrorBox>{orderError}</ErrorBox></div>}
       </Card>}
 
-      <DashboardGrid layout={settings} order={draftOrder ?? settings.order} overview={o} instances={list}
+      <DashboardGrid layout={settings} order={draftOrder ?? settings.order} sizes={draftSizes ?? settings.sizes} overview={o} instances={list}
         onHide={(id) => void hideWidget(id)} hideDisabled={!layout.data || hiding || customizing}
-        onReorder={arranging ? (order) => { if (!orderInFlight.current) setDraftOrder(order); } : undefined} disabled={savingOrder} />
+        onReorder={arranging ? (order) => { if (!orderInFlight.current) setDraftOrder(order); } : undefined}
+        onResize={arranging ? (id, size) => { if (!orderInFlight.current) setDraftSizes((current) => ({ ...(current ?? settings.sizes), [id]: size })); } : undefined}
+        disabled={savingOrder} />
 
       {visible.length === 0 && <Card>
         <EmptyState icon={<LayoutDashboard className="size-6" />} title={t('dashboard.customize.emptyTitle')} action={customizeButton}>

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { defaultDashboardLayout, isDashboardLayoutInput, isWidgetId, isWidgetOrder, normalizeDashboardLayout, normalizeWidgetOrder } from '../shared/dashboard.ts';
+import { defaultDashboardLayout, isDashboardLayoutInput, isWidgetId, isWidgetOrder, isWidgetSizes, normalizeDashboardLayout, normalizeWidgetOrder } from '../shared/dashboard.ts';
 import { fail } from '../shared/i18n/server.ts';
 import { getSetting, setSetting, tx } from './db.ts';
 
@@ -23,6 +23,7 @@ export function createDashboardRouter() {
       const next = normalizeDashboardLayout(req.body);
       // Older clients save visibility without knowing about widget ordering.
       if (req.body.order === undefined) next.order = readLayout().order;
+      if (req.body.sizes === undefined) next.sizes = readLayout().sizes;
       setSetting(SETTING, JSON.stringify(next));
       return next;
     });
@@ -33,6 +34,19 @@ export function createDashboardRouter() {
     const layout = tx(() => {
       const next = readLayout();
       next.order = normalizeWidgetOrder(req.body.order);
+      setSetting(SETTING, JSON.stringify(next));
+      return next;
+    });
+    res.json(layout);
+  });
+  router.patch('/layout/geometry', (req, res) => {
+    if (!req.body || Object.keys(req.body).length !== 2 || !isWidgetOrder(req.body.order) || !isWidgetSizes(req.body.sizes)) {
+      fail(400, 'dashboard.customize.invalid');
+    }
+    const layout = tx(() => {
+      const next = readLayout();
+      next.order = normalizeWidgetOrder(req.body.order);
+      next.sizes = { ...next.sizes, ...req.body.sizes };
       setSetting(SETTING, JSON.stringify(next));
       return next;
     });
