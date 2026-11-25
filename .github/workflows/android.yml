@@ -1,0 +1,49 @@
+name: Android App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Test Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: JDK 17 einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle einrichten
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit-Tests und Debug-APK bauen
+        run: ./gradlew testDebugUnitTest assembleDebug --no-daemon
+
+      - name: Debug-APK als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowvault-notify-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

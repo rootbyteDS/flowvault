@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExecutionPage } from '../../shared/executions.ts';
+import type { NotifyIngestPayload } from '../../shared/notify.ts';
 import type { TimelineVersion } from './analysis.ts';
 import { LocalizedError } from '../../shared/i18n/index.ts';
 import '../../shared/i18n/server.ts'; // setzt die Server-Sprache für Fehlermeldungen
@@ -50,6 +51,7 @@ async function get<T>(p: string): Promise<T> {
 export interface CoreInstance {
   id: number;
   name: string;
+  color?: string;
   enabled: number;
 }
 
@@ -74,4 +76,20 @@ export const core = {
   },
   instanceTimeline: (instanceId: number) => get<WorkflowTimeline[]>(`/instances/${instanceId}/timeline`),
   workflowTimeline: (workflowId: number) => get<WorkflowTimeline & { instanceName: string }>(`/workflows/${workflowId}/timeline`),
+  notifyIngest: (payload: NotifyIngestPayload) => {
+    if (process.env.NOTIFY_DISABLED === '1') return;
+    let tok: string;
+    try {
+      tok = token();
+    } catch {
+      return;
+    }
+    void fetch(`${CORE_URL}/internal/notify/ingest`, {
+      method: 'POST',
+      headers: { 'X-Internal-Token': tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(2_000),
+    }).catch(() => {});
+  },
 };

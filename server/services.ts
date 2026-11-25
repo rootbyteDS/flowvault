@@ -9,8 +9,9 @@ import { fork, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA_DIR } from './db.ts';
-import { HEALTH_PORT, INTERNAL_TOKEN, MCP_TOKEN } from './internal.ts';
+import { HEALTH_PORT, INTERNAL_TOKEN, MCP_TOKEN, NOTIFY_TOKEN } from './internal.ts';
 import { MCP_PORT } from './mcp.ts';
+import { NOTIFY_PORT } from './notify.ts';
 import { t } from '../shared/i18n/server.ts';
 
 interface ServiceSpec {
@@ -37,6 +38,22 @@ export function mcpEnv(corePort: number, source: NodeJS.ProcessEnv = process.env
   };
 }
 
+/** Variablen für den Notify-Dienst. Bewusst ohne APP_SECRET, INTERNAL_TOKEN, MCP_TOKEN und Zugangsdaten. */
+const NOTIFY_INHERITED = ['PATH', 'NODE_ENV', 'TZ', 'LANG', 'DEFAULT_LANGUAGE', 'NOTIFY_ALLOW_PRIVATE_PUSH', 'NOTIFY_PUSH_ALLOWLIST'] as const;
+
+export function notifyEnv(corePort: number, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of NOTIFY_INHERITED) if (source[key] !== undefined) env[key] = source[key];
+  return {
+    ...env,
+    NOTIFY_TOKEN,
+    CORE_URL: `http://127.0.0.1:${corePort}`,
+    NOTIFY_HOST: '127.0.0.1',
+    NOTIFY_PORT: String(NOTIFY_PORT),
+    NOTIFY_DATA_DIR: source.NOTIFY_DATA_DIR ?? DATA_DIR,
+  };
+}
+
 const SERVICES: ServiceSpec[] = [
   {
     name: 'health',
@@ -56,6 +73,12 @@ const SERVICES: ServiceSpec[] = [
     entry: fileURLToPath(new URL('../services/mcp/index.ts', import.meta.url)),
     external: process.env.MCP_URL,
     env: (corePort) => mcpEnv(corePort),
+  },
+  {
+    name: 'notify',
+    entry: fileURLToPath(new URL('../services/notify/index.ts', import.meta.url)),
+    external: process.env.NOTIFY_URL,
+    env: (corePort) => notifyEnv(corePort),
   },
 ];
 

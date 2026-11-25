@@ -26,6 +26,9 @@ services:
       UPDATE_MANAGEMENT_URL: ${UPDATE_MANAGEMENT_URL:-}
       # Optional: Sprache für Server-Logs und KI-Texte (de oder en). Leer = Deutsch.
       DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-}
+      # Optional: UnifiedPush an private LAN-/Docker-Ziele (z. B. lokales ntfy) freigeben.
+      NOTIFY_ALLOW_PRIVATE_PUSH: ${NOTIFY_ALLOW_PRIVATE_PUSH:-0}
+      NOTIFY_PUSH_ALLOWLIST: ${NOTIFY_PUSH_ALLOWLIST:-}
     volumes:
       - flowvault-data:/data
 

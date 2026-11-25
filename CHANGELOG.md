@@ -12,6 +12,8 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 
 ### Hinzugefügt
 
+- **Mobile App & Benachrichtigungen (FlowVault Notify):** Neuer isolierter Dienst `services/notify` (`NOTIFY_PORT`, Standard `4300`, `data/notify.db`) mit Mobile-API (`/mobile/v1/*`) und passender Android-App im Ordner `android/` (Kotlin, Jetpack Compose, Offline-Cache, QR-Pairing). Informiert wie in einem Messenger je n8n-Instanz über Health-Warnungen, gebündelte Fehlläufe, Sync-/Poll-Ausfälle, Workflow-Änderungen (inkl. stiller KI-Nachlieferung) und Entwarnungen. Unterstützt Zero-Payload-UnifiedPush (z. B. selbst gehostetes ntfy), SSE-Echtzeit-Dienst für LAN/Tailscale sowie WorkManager-Sync, Ruhezeiten, Stummschaltung und Android-`MessagingStyle`-Benachrichtigungen. Einrichtung und QR-Code-Kopplung unter **Einstellungen → Mobile App & Benachrichtigungen** (standardmäßig aus).
+
 - Dashboard-Widgets lassen sich im Anordnen-Modus am Griff unten rechts in Breite und Höhe vergrößern und verkleinern, auch per Touch oder Tastatur. Größen und Reihenfolge werden gemeinsam für das Admin-Konto gespeichert. Automatische Höhe und Standardgrößen lassen sich jederzeit wiederherstellen; bei kleiner Höhe bleiben die Inhalte scrollbar.
 
 - Zugang für KI-Agents über MCP (Model Context Protocol): Claude, ChatGPT, Cursor und andere Clients fragen unter `/mcp` nur lesend, wie es den n8n-Instanzen geht. Sechs Tools liefern ein Urteil je Instanz mit Gründen, Fehlläufe gruppiert nach Workflow, Node und Meldung, offene Warnungen, die Fehlerquote je Version, letzte Änderungen und die gesicherten Workflows. Einschalten und Tokens pro Agent anlegen unter **Einstellungen → Zugang für KI-Agents (MCP)**; Tokens lassen sich auf Instanzen beschränken und einzeln widerrufen. Der Zugang ist standardmäßig aus. Der MCP-Dienst läuft wie der Health-Dienst als eigener Prozess (`MCP_PORT`, Standard 4200, nur `127.0.0.1`).
@@ -29,6 +31,8 @@ Alle für Nutzer relevanten Änderungen an FlowVault. Das Format folgt [Keep a C
 - Einheitliche Widget-Namen auf dem Dashboard und in „Dashboard anpassen“. Die Einstellungen der Verlaufswidgets sind über ein Zahnrad direkt am Widget erreichbar; alle Widgets lassen sich über ein X ausblenden. Das direkte Ausblenden wird für das Admin-Konto gespeichert und erhält die übrige Widget-Auswahl.
 
 ### Sicherheit
+
+- Der Mobile-App-Zugang (`services/notify`) läuft wie MCP als eigener Kindprozess ohne `APP_SECRET`, ohne `INTERNAL_TOKEN` und ohne Zugriff auf Workflow-Snapshots oder n8n-API-Keys. QR-Kopplungscodes gelten 5 Minuten und genau einmal; Gerätetokens (`fv_app_…`) werden nur als SHA-256 gespeichert, lassen sich auf Instanzen beschränken und einzeln widerrufen. UnifiedPush sendet ausschließlich leere Wake-up-Signale ohne Klartext und blockiert Weiterleitungen, Loopback sowie Cloud-Metadaten-Adressen (private Netze nur mit `NOTIFY_ALLOW_PRIVATE_PUSH=1`).
 
 - Der MCP-Zugang gibt keine Workflow-Inhalte heraus (kein JSON, keine Parameter, kein Diff, keine KI-Texte). Fehlermeldungen und Namen werden vor der Ausgabe an Agents geschwärzt: Schlüssel und Tokens, Query-Parameter in URLs, Zugangsdaten in URLs und E-Mail-Adressen. In FlowVault selbst bleiben die Meldungen vollständig. Agent-Tokens werden nur als SHA-256 gespeichert, falsche Tokens bremst FlowVault je Adresse. Der MCP-Dienst erhält keinen Anwendungsschlüssel und ein eigenes internes Token, das der Core nur für lesende Aufrufe ohne Zugriff auf n8n annimmt.
 

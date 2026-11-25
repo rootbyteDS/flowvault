@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.FlowVaultNotify" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#11151C</item>
+        <item name="android:navigationBarColor">#11151C</item>
+        <item name="android:windowBackground">#151A23</item>
+    </style>
+</resources>

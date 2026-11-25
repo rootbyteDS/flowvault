@@ -20,6 +20,7 @@ import {
 import { healthProxy, internalRouter } from './internal.ts';
 import { startServices } from './services.ts';
 import { createMcpEndpoint, mcpAdminProxy } from './mcp.ts';
+import { createMobileEndpoint, notifyAdminProxy } from './notify.ts';
 import { promoteRouter } from './promote/router.ts';
 import { HttpError, languageWarning, requestT, t } from '../shared/i18n/server.ts';
 import { renderError, type Translator } from '../shared/i18n/index.ts';
@@ -108,6 +109,9 @@ app.use('/internal', internalRouter);
 
 // MCP für Agents – Agent-Token statt Login, nur lesend, siehe mcp.ts und services/mcp
 app.all('/mcp', createMcpEndpoint(clientIp));
+
+// Mobile API für die Android-App – Gerätetoken statt Login, siehe notify.ts und services/notify
+app.use('/mobile/v1', createMobileEndpoint(clientIp));
 
 // ───────────────────────── Auth ─────────────────────────
 
@@ -534,6 +538,10 @@ app.use('/api/health', healthProxy);
 // ───────────────────────── MCP-Dienst (Zugang für Agents verwalten) ─────────────────────────
 
 app.use('/api/mcp', mcpAdminProxy);
+
+// ───────────────────────── Notify-Dienst (Android-App & Benachrichtigungen) ─────────────────────────
+
+app.use('/api/notify', notifyAdminProxy);
 
 app.use('/api', (_req, _res) => {
   throw new HttpError(404, 'errors.http.unknownEndpoint');

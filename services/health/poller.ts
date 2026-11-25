@@ -85,33 +85,110 @@ export async function pollInstance(inst: CoreInstance) {
   db.prepare('INSERT INTO poll_state (instance_id, name) VALUES (?, ?) ON CONFLICT (instance_id) DO UPDATE SET name = excluded.name').run(
     inst.id, inst.name,
   );
+  const prevPoll = db.prepare('SELECT ok, error_seq, last_success_at FROM poll_state WHERE instance_id = ?').get(inst.id) as {
+    ok: number | null;
+    error_seq: number;
+    last_success_at: number | null;
+  };
+  const color = inst.color ?? '#ea4b71';
   try {
     const all = await scan(inst.id, { stopSeq: knownUpTo(inst.id), cutoff, maxPages: MAX_PAGES, limit: 250 });
     // A gap may survive later successful polls (which start at newer IDs).
     // Keep the warning until the affected history has aged out of retention.
-    const prior = db.prepare('SELECT last_success_at FROM poll_state WHERE instance_id = ?').get(inst.id) as { last_success_at: number | null };
-    if (all.limited || (prior.last_success_at !== null && prior.last_success_at < cutoff)) {
+    if (all.limited || (prevPoll.last_success_at !== null && prevPoll.last_success_at < cutoff)) {
       db.prepare('UPDATE poll_state SET incomplete_until = ? WHERE instance_id = ?').run(Date.now(), inst.id);
     }
 
-    const state = db.prepare('SELECT error_seq FROM poll_state WHERE instance_id = ?').get(inst.id) as { error_seq: number };
+    const prevErrorSeq = prevPoll.error_seq;
     const errs = await scan(inst.id, {
-      stopSeq: state.error_seq,
+      stopSeq: prevErrorSeq,
       cutoff,
       maxPages: MAX_ERROR_PAGES,
       limit: ERROR_PAGE,
       status: 'error',
       includeData: true,
     });
-    if (errs.maxSeq > state.error_seq) db.prepare('UPDATE poll_state SET error_seq = ? WHERE instance_id = ?').run(errs.maxSeq, inst.id);
+    if (errs.maxSeq > prevErrorSeq) db.prepare('UPDATE poll_state SET error_seq = ? WHERE instance_id = ?').run(errs.maxSeq, inst.id);
 
     db.prepare('DELETE FROM executions WHERE instance_id = ? AND started_at < ?').run(inst.id, Date.now() - s.retentionDays * 864e5);
     db.prepare('UPDATE poll_state SET last_poll_at = ?, last_success_at = ?, ok = 1, error = NULL WHERE instance_id = ?').run(Date.now(), Date.now(), inst.id);
-    if (all.stored || errs.stored) await evaluateInstance(inst.id, inst.name);
+
+    if (prevPoll.ok === 0) {
+      core.notifyIngest({
+        instanceId: inst.id,
+        instanceName: inst.name,
+        instanceColor: color,
+        kind: 'health_poll_recovered',
+        severity: 'info',
+        title: `Ausführungsabruf wieder aktiv: ${inst.name}`,
+        body: 'Ausführungen werden wieder erfolgreich aus n8n geladen.',
+        metadata: { webPath: `/instances/${inst.id}` },
+      });
+    }
+
+    const timelines = all.stored || errs.stored ? await evaluateInstance(inst.id, inst.name, color) : [];
+
+    // Neue Fehlläufe (nur nach erstem erfolgreichen Poll, damit Erstabruf keine historischen Fehler flutet)
+    if (prevPoll.last_success_at !== null && errs.stored > 0) {
+      const manualFilter = s.includeManual ? '' : " AND mode != 'manual'";
+      const freshErrors = db
+        .prepare(
+          `SELECT id, workflow_n8n_id, started_at, error_node, error_message
+             FROM executions
+            WHERE instance_id = ? AND seq > ? AND status IN ('error', 'crashed')${manualFilter}
+            ORDER BY seq ASC LIMIT 50`,
+        )
+        .all(inst.id, prevErrorSeq) as {
+        id: string;
+        workflow_n8n_id: string;
+        started_at: number | null;
+        error_node: string | null;
+        error_message: string | null;
+      }[];
+      const byN8n = new Map(timelines.map((tl) => [tl.n8nId, tl]));
+      for (const fe of freshErrors) {
+        const wf = byN8n.get(fe.workflow_n8n_id);
+        const wfName = wf?.name ?? `Workflow #${fe.workflow_n8n_id}`;
+        const node = fe.error_node ?? 'Unbekannter Node';
+        const errMsg = fe.error_message ?? 'Ausführung fehlgeschlagen';
+        core.notifyIngest({
+          eventUid: `health:exec:${inst.id}:${fe.id}`,
+          groupKey: `exec:${inst.id}:${fe.workflow_n8n_id}:${node}:${errMsg.slice(0, 80)}`,
+          instanceId: inst.id,
+          instanceName: inst.name,
+          instanceColor: color,
+          workflowId: wf?.workflowId ?? null,
+          workflowName: wfName,
+          kind: 'execution_failed',
+          severity: 'high',
+          title: `Fehllauf: ${wfName}`,
+          body: `${node}: ${errMsg}`,
+          metadata: {
+            errorNode: fe.error_node,
+            errorMessage: fe.error_message,
+            webPath: wf ? `/workflows/${wf.workflowId}` : `/instances/${inst.id}`,
+          },
+          createdAt: fe.started_at ?? Date.now(),
+        });
+      }
+    }
   } catch (e) {
     const msg = packError(e);
+    const rendered = renderMessage(msg, t);
     db.prepare('UPDATE poll_state SET last_poll_at = ?, incomplete_until = ?, ok = 0, error = ? WHERE instance_id = ?').run(Date.now(), Date.now(), msg, inst.id);
-    console.warn(t('log.healthInstance', { id: inst.id, reason: renderMessage(msg, t) }));
+    console.warn(t('log.healthInstance', { id: inst.id, reason: rendered }));
+    if (prevPoll.ok !== 0) {
+      core.notifyIngest({
+        instanceId: inst.id,
+        instanceName: inst.name,
+        instanceColor: color,
+        kind: 'health_poll_error',
+        severity: 'high',
+        title: `Ausführungsabruf fehlgeschlagen: ${inst.name}`,
+        body: rendered,
+        metadata: { errorMessage: rendered, webPath: `/instances/${inst.id}` },
+      });
+    }
   } finally {
     running.delete(inst.id);
   }

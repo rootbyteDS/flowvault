@@ -15,4 +15,5 @@ data
 *.sqlite*-shm
 *.log
 coverage
+android
 .DS_Store

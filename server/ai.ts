@@ -9,6 +9,7 @@ import { diffWorkflows, type Snapshot, type WfNode, type WorkflowDiff } from '..
 import { getTranslator, isLocale, packError, renderError, type LocaleCode } from '../shared/i18n/index.ts';
 import { serverLocale, t } from '../shared/i18n/server.ts';
 import { isSecretName, redact } from '../shared/redact.ts';
+import { emitNotify } from './notify.ts';
 
 export { isSecretName, looksRandom, redact } from '../shared/redact.ts';
 
@@ -267,6 +268,21 @@ export async function generateForVersion(versionId: number) {
   try {
     const { summary, model } = await summarize(prevRow ? snapshotOf(prevRow.id) : null, snapshotOf(v.id)!);
     db.prepare("UPDATE versions SET ai_summary = ?, ai_model = ?, ai_status = 'done', ai_error = NULL WHERE id = ?").run(JSON.stringify(summary), model, v.id);
+    const meta = db
+      .prepare('SELECT w.instance_id, i.name AS instance_name, i.color AS instance_color FROM workflows w JOIN instances i ON i.id = w.instance_id WHERE w.id = ?')
+      .get(v.workflow_id) as { instance_id: number; instance_name: string; instance_color: string } | undefined;
+    if (meta) {
+      emitNotify({
+        type: 'ai_summary',
+        instanceId: meta.instance_id,
+        instanceName: meta.instance_name,
+        instanceColor: meta.instance_color,
+        workflowId: v.workflow_id,
+        versionId: v.id,
+        versionNumber: v.number,
+        aiSummary: summary,
+      });
+    }
     return summary;
   } catch (e) {
     db.prepare("UPDATE versions SET ai_status = 'error', ai_error = ? WHERE id = ?").run(packError(e, 300), v.id);

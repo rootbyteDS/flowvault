@@ -6,7 +6,7 @@ coverage/
 *.log
 
 # Lokale Konfiguration, Zugangsdaten und Laufzeitdaten
-data/
+/data/
 .env
 .env.*
 !.env.example
@@ -18,6 +18,13 @@ data/
 *.sqlite3
 *.sqlite*-wal
 *.sqlite*-shm
+
+# Android Build-Artefakte
+android/.gradle/
+android/local.properties
+android/build/
+android/app/build/
+android/.idea/
 
 # macOS
 .DS_Store

@@ -102,6 +102,9 @@ docker compose up -d
 | `UPDATE_MANAGEMENT_URL` | –     | Optionaler öffentlicher Link zum Deployment-Verlauf bzw. Arcane-Projekt |
 | `HEALTH_PORT`    | `4100`       | Interner Port des Health-Dienstes (nur `127.0.0.1`, nie nach außen) |
 | `MCP_PORT`       | `4200`       | Interner Port des MCP-Dienstes (nur `127.0.0.1`; Agents erreichen ihn über `/mcp` des Cores) |
+| `NOTIFY_PORT`    | `4300`       | Interner Port des Notify-Dienstes (nur `127.0.0.1`; die Android-App erreicht ihn über `/mobile/v1` des Cores) |
+| `NOTIFY_ALLOW_PRIVATE_PUSH` | `0` | `1` erlaubt UnifiedPush-Ziele im eigenen LAN/Docker-Netz (z. B. lokales ntfy); Loopback und Cloud-Metadaten bleiben gesperrt |
+| `NOTIFY_PUSH_ALLOWLIST` | –      | Optional: kommagetrennte erlaubte Hostnamen für UnifiedPush-Endpunkte |
 
 Docker Compose übergibt nur die Variablen, die in `docker-compose.yml` unter `environment` stehen; weitere dort ergänzen. Beim direkten Start über npm wird `.env` nicht automatisch geladen: Variablen in der Shell setzen, z. B. `PORT=4001 HEALTH_PORT=4101 npm start` (macOS/Linux).
 

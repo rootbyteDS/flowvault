@@ -37,6 +37,7 @@ before(async () => {
     APP_SECRET: 'test-only-internal-key',
     INTERNAL_TOKEN: 'internal-test-token',
     MCP_TOKEN: 'mcp-test-token',
+    NOTIFY_TOKEN: 'notify-test-token',
     HEALTH_URL: `http://127.0.0.1:${(healthServer.address() as AddressInfo).port}`,
   });
   const { db } = await import('./db.ts');
@@ -122,8 +123,22 @@ test('health reads are passed on with the internal token, writes and unknown pat
 });
 
 test('the MCP service gets a fixed environment without the app secret or internal token', async () => {
-  const { mcpEnv } = await import('./services.ts');
+  const { mcpEnv, notifyEnv } = await import('./services.ts');
   const env = mcpEnv(4000, { PATH: '/bin', APP_SECRET: 'x', INTERNAL_TOKEN: 'y', ADMIN_PASSWORD: 'z', UPDATE_WEBHOOK_TOKEN: 'w', DEFAULT_LANGUAGE: 'en' });
   assert.deepEqual(Object.keys(env).sort(), ['CORE_URL', 'DEFAULT_LANGUAGE', 'MCP_DATA_DIR', 'MCP_HOST', 'MCP_PORT', 'MCP_TOKEN', 'PATH']);
   assert.equal(env.MCP_TOKEN, 'mcp-test-token');
+
+  const nEnv = notifyEnv(4000, { PATH: '/bin', APP_SECRET: 'x', INTERNAL_TOKEN: 'y', MCP_TOKEN: 'm', ADMIN_PASSWORD: 'z', DEFAULT_LANGUAGE: 'en' });
+  assert.deepEqual(Object.keys(nEnv).sort(), ['CORE_URL', 'DEFAULT_LANGUAGE', 'NOTIFY_DATA_DIR', 'NOTIFY_HOST', 'NOTIFY_PORT', 'NOTIFY_TOKEN', 'PATH']);
+  assert.equal(nEnv.NOTIFY_TOKEN, 'notify-test-token');
+});
+
+test('the Notify token can read metadata and dismiss alerts, but cannot access n8n or ingest', async () => {
+  const asNotify = (p: string, init: RequestInit = {}) =>
+    fetch(`${base}${p}`, { ...init, headers: { 'X-Internal-Token': 'notify-test-token', 'Content-Type': 'application/json', ...init.headers } });
+  assert.equal((await asNotify('/instances')).status, 200);
+  assert.equal((await asNotify('/health/alerts')).status, 200);
+  assert.equal((await asNotify('/health/alerts/1/dismiss', { method: 'POST', body: '{}' })).status, 200);
+  assert.equal((await asNotify('/instances/1/executions')).status, 403);
+  assert.equal((await asNotify('/notify/ingest', { method: 'POST', body: '{}' })).status, 403);
 });

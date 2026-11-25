@@ -1,0 +1,2 @@
+-keepattributes *Annotation*, InnerClasses
+-keep class de.flown8tive.flowvault.notify.model.** { *; }

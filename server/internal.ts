@@ -34,6 +34,11 @@ export const INTERNAL_TOKEN = TOKEN;
 /** Token des MCP-Dienstes: nur lesend und nur für `MCP_PATHS`. */
 export const MCP_TOKEN = loadToken(process.env.MCP_TOKEN, 'mcp.token');
 if (MCP_TOKEN === TOKEN) throw new Error('MCP_TOKEN must differ from INTERNAL_TOKEN');
+/** Token des Notify-Dienstes: Metadaten + Health-Warnungen ausblenden (keine Snapshots, kein n8n). */
+export const NOTIFY_TOKEN = loadToken(process.env.NOTIFY_TOKEN, 'notify.token');
+if (NOTIFY_TOKEN === TOKEN || NOTIFY_TOKEN === MCP_TOKEN) {
+  throw new Error('NOTIFY_TOKEN must differ from INTERNAL_TOKEN and MCP_TOKEN');
+}
 
 /** Was der MCP-Dienst lesen darf. Alles andere – vor allem Ausführungen direkt aus n8n – bleibt gesperrt. */
 const MCP_PATHS = [
@@ -44,12 +49,31 @@ const MCP_PATHS = [
   /^\/health\/.+$/,
 ];
 
+/** Was der Notify-Dienst aufrufen darf: nur Metadaten, offene Alerts und Alert-Dismiss. */
+const NOTIFY_READ_PATHS = [
+  /^\/instances$/,
+  /^\/workflows$/,
+  /^\/activity$/,
+  /^\/health\/alerts$/,
+];
+const NOTIFY_WRITE_PATHS = [/^\/health\/alerts\/\d+\/dismiss$/];
+
 function requireToken(req: Request, res: Response, next: NextFunction) {
   const given = req.headers['x-internal-token'];
   if (typeof given === 'string' && safeEqual(given, TOKEN)) return next();
   if (typeof given === 'string' && safeEqual(given, MCP_TOKEN)) {
     if (req.method === 'GET' && MCP_PATHS.some((re) => re.test(req.path))) {
       res.locals.mcp = true;
+      return next();
+    }
+    return void res.status(403).json({ error: requestT(req)('errors.http.readOnlyToken') });
+  }
+  if (typeof given === 'string' && safeEqual(given, NOTIFY_TOKEN)) {
+    if (
+      (req.method === 'GET' && NOTIFY_READ_PATHS.some((re) => re.test(req.path))) ||
+      (req.method === 'POST' && NOTIFY_WRITE_PATHS.some((re) => re.test(req.path)))
+    ) {
+      res.locals.notify = true;
       return next();
     }
     return void res.status(403).json({ error: requestT(req)('errors.http.readOnlyToken') });
@@ -194,6 +218,39 @@ internalRouter.get('/health/{*rest}', async (req, res) => {
     res.status(r.status).type('application/json').send((await r.text()) || '{}');
   } catch {
     res.status(503).json({ error: requestT(req)('errors.http.healthUnavailable'), unavailable: true });
+  }
+});
+
+internalRouter.post('/health/alerts/:id/dismiss', async (req, res) => {
+  const alertId = id(req.params.id);
+  try {
+    const r = await fetch(`${HEALTH_URL}/v1/alerts/${alertId}/dismiss`, {
+      method: 'POST',
+      headers: { 'X-Internal-Token': TOKEN, Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: '{}',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15_000),
+    });
+    res.status(r.status).type('application/json').send((await r.text()) || '{}');
+  } catch {
+    res.status(503).json({ error: requestT(req)('errors.http.healthUnavailable'), unavailable: true });
+  }
+});
+
+/** Ereignisse vom Health-Dienst an den Notify-Dienst weiterreichen (nur mit INTERNAL_TOKEN). */
+internalRouter.post('/notify/ingest', async (req, res) => {
+  const notifyUrl = (process.env.NOTIFY_URL ?? `http://127.0.0.1:${Number(process.env.NOTIFY_PORT ?? 4300)}`).replace(/\/+$/, '');
+  try {
+    const r = await fetch(`${notifyUrl}/v1/ingest`, {
+      method: 'POST',
+      headers: { 'X-Internal-Token': NOTIFY_TOKEN, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(req.body ?? {}),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(2_000),
+    });
+    res.status(r.status).type('application/json').send((await r.text()) || '{}');
+  } catch {
+    res.status(503).json({ ok: false, unavailable: true });
   }
 });
 

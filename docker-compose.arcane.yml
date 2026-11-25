@@ -30,6 +30,9 @@ services:
       DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-}
       # Bei Betrieb hinter einem Reverse Proxy in Arcane TRUST_PROXY=1 setzen.
       TRUST_PROXY: ${TRUST_PROXY:-0}
+      # Optional: UnifiedPush an private LAN-/Docker-Ziele (z. B. lokales ntfy) freigeben.
+      NOTIFY_ALLOW_PRIVATE_PUSH: ${NOTIFY_ALLOW_PRIVATE_PUSH:-0}
+      NOTIFY_PUSH_ALLOWLIST: ${NOTIFY_PUSH_ALLOWLIST:-}
     volumes:
       - flowvault-data:/data
 

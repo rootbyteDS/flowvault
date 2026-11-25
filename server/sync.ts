@@ -2,6 +2,7 @@ import { db, tx } from './db.ts';
 import { decrypt, pack, sha256, unpack } from './crypto.ts';
 import { N8nClient, type N8nWorkflow } from './n8n.ts';
 import { onVersionCreated } from './ai.ts';
+import { describeChangeSummary, emitNotify } from './notify.ts';
 import { mappingSetFor, workflowLabelsFor, targetWorkflowFor } from './promote/mappings.ts';
 import { requirePair } from './promote/pairs.ts';
 import { transformSnapshot, hasDynamicReferences, workflowDependencies } from './promote/transform.ts';
@@ -88,7 +89,7 @@ function latestVersion(workflowId: number) {
 export function recordWorkflow(
   inst: InstanceRow,
   wf: N8nWorkflow,
-  opts: { restoredFrom?: number; message?: string; event?: 'restored' | 'promoted' } = {},
+  opts: { restoredFrom?: number; message?: string; event?: 'restored' | 'promoted'; suppressNotify?: boolean } = {},
 ): 'created' | 'changed' | null {
   const now = Date.now();
   const snap = toSnapshot(wf);
@@ -111,8 +112,7 @@ export function recordWorkflow(
     return null;
   }
 
-  let versionId = 0;
-  const result = tx(() => {
+  const txOut = tx(() => {
     let kind: 'created' | 'changed' = 'changed';
     if (!row) {
       const r = db
@@ -125,6 +125,7 @@ export function recordWorkflow(
       kind = 'created';
     }
     const prev = latestVersion(row.id);
+    const prevVersionId = prev?.id ?? null;
     const prevSnap = prev ? loadSnapshot(prev.id)! : null;
     const summary: ChangeSummary = diffWorkflows(prevSnap, snap).summary;
     if (opts.restoredFrom) summary.restoredFrom = opts.restoredFrom;
@@ -142,18 +143,59 @@ export function recordWorkflow(
          latest_hash=?, version_count=?, deleted_at=NULL WHERE id=?`,
     ).run(meta.name, meta.active, meta.archived, meta.node_count, meta.tags, meta.n8n_updated_at, now, now, hash, number, row.id);
 
-    versionId = Number(v.lastInsertRowid);
-    db.prepare('INSERT INTO events (instance_id, workflow_id, version_id, kind, created_at) VALUES (?,?,?,?,?)').run(
+    const versionId = Number(v.lastInsertRowid);
+    const eventKind: 'created' | 'changed' | 'restored' | 'promoted' = opts.event ?? (opts.restoredFrom ? 'restored' : kind);
+    const ev = db.prepare('INSERT INTO events (instance_id, workflow_id, version_id, kind, created_at) VALUES (?,?,?,?,?)').run(
       inst.id,
       row.id,
       versionId,
-      opts.event ?? (opts.restoredFrom ? 'restored' : kind),
+      eventKind,
       now,
     );
-    return kind;
+    return { kind, workflowId: row.id, versionId, versionNumber: number, prevVersionId, summary, eventId: Number(ev.lastInsertRowid), eventKind };
   });
-  onVersionCreated(versionId, opts.restoredFrom ? 'restored' : result);
-  return result;
+  onVersionCreated(txOut.versionId, opts.restoredFrom ? 'restored' : txOut.kind);
+
+  if (!opts.suppressNotify) {
+    const notifyKind =
+      txOut.eventKind === 'restored'
+        ? 'workflow_restored'
+        : txOut.eventKind === 'promoted'
+          ? 'workflow_promoted'
+          : txOut.eventKind === 'created'
+            ? 'workflow_created'
+            : 'workflow_changed';
+    const webPath =
+      notifyKind === 'workflow_changed' && txOut.prevVersionId
+        ? `/compare?from=${txOut.prevVersionId}&to=${txOut.versionId}`
+        : `/workflows/${txOut.workflowId}`;
+    const body =
+      notifyKind === 'workflow_restored' && opts.restoredFrom
+        ? `Version v${opts.restoredFrom} wiederhergestellt → v${txOut.versionNumber}`
+        : describeChangeSummary(txOut.summary);
+    emitNotify({
+      eventUid: `core:event:${txOut.eventId}`,
+      instanceId: inst.id,
+      instanceName: inst.name,
+      instanceColor: inst.color,
+      workflowId: txOut.workflowId,
+      workflowName: snap.name,
+      versionId: txOut.versionId,
+      versionNumber: txOut.versionNumber,
+      kind: notifyKind,
+      severity: notifyKind === 'workflow_changed' && txOut.summary.activeChanged !== undefined ? 'high' : 'normal',
+      title: `${snap.name} · v${txOut.versionNumber}`,
+      body,
+      metadata: {
+        summary: txOut.summary,
+        activeChanged: txOut.summary.activeChanged,
+        restoredFrom: opts.restoredFrom,
+        webPath,
+      },
+      createdAt: now,
+    });
+  }
+  return txOut.kind;
 }
 
 const running = new Set<number>();
@@ -175,6 +217,7 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
 
   try {
     const workflows = await clientFor(inst).listWorkflows();
+    const isInitialBulk = inst.last_sync_at === null && workflows.length > 5;
     const seen = new Set<string>();
     const now0 = Date.now();
     for (const wf of workflows) {
@@ -189,22 +232,51 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
         continue;
       }
       stats.total++;
-      const r = recordWorkflow(inst, wf);
+      const r = recordWorkflow(inst, wf, { suppressNotify: isInitialBulk });
       if (r === 'created') stats.created++;
       if (r === 'changed') stats.changed++;
     }
 
+    if (isInitialBulk && stats.created > 0) {
+      emitNotify({
+        eventUid: `core:initial_sync:${runId}`,
+        instanceId: inst.id,
+        instanceName: inst.name,
+        instanceColor: inst.color,
+        kind: 'initial_sync',
+        severity: 'info',
+        title: `Erstsicherung abgeschlossen: ${inst.name}`,
+        body: `${stats.created} Workflows erstmals gesichert.`,
+        metadata: { importedCount: stats.created, webPath: `/instances/${inst.id}` },
+      });
+    }
+
     // In n8n gelöschte Workflows markieren (Versionen bleiben erhalten!)
-    const known = db.prepare('SELECT id, n8n_id FROM workflows WHERE instance_id = ? AND deleted_at IS NULL').all(instanceId) as {
+    const known = db.prepare('SELECT id, n8n_id, name FROM workflows WHERE instance_id = ? AND deleted_at IS NULL').all(instanceId) as {
       id: number;
       n8n_id: string;
+      name: string;
     }[];
     const now = Date.now();
     for (const w of known) {
       if (!seen.has(w.n8n_id)) {
         db.prepare('UPDATE workflows SET deleted_at = ? WHERE id = ?').run(now, w.id);
-        db.prepare('INSERT INTO events (instance_id, workflow_id, kind, created_at) VALUES (?,?,?,?)').run(instanceId, w.id, 'deleted', now);
+        const ev = db.prepare('INSERT INTO events (instance_id, workflow_id, kind, created_at) VALUES (?,?,?,?)').run(instanceId, w.id, 'deleted', now);
         stats.deleted++;
+        emitNotify({
+          eventUid: `core:event:${Number(ev.lastInsertRowid)}`,
+          instanceId: inst.id,
+          instanceName: inst.name,
+          instanceColor: inst.color,
+          workflowId: w.id,
+          workflowName: w.name,
+          kind: 'workflow_deleted',
+          severity: 'high',
+          title: `Workflow gelöscht: ${w.name}`,
+          body: 'In n8n entfernt – die Versionshistorie bleibt in FlowVault erhalten.',
+          metadata: { webPath: `/workflows/${w.id}` },
+          createdAt: now,
+        });
       }
     }
 
@@ -212,14 +284,39 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
       Date.now(), stats.total, stats.created, stats.changed, stats.deleted, runId,
     );
     db.prepare('UPDATE instances SET last_sync_at=?, last_sync_ok=1, last_sync_error=NULL WHERE id=?').run(Date.now(), instanceId);
+    if (inst.last_sync_ok === 0) {
+      emitNotify({
+        eventUid: `core:sync_recovered:${runId}`,
+        instanceId: inst.id,
+        instanceName: inst.name,
+        instanceColor: inst.color,
+        kind: 'sync_recovered',
+        severity: 'info',
+        title: `Sync wieder aktiv: ${inst.name}`,
+        body: `Backup-Sync war wieder erfolgreich (${stats.total} Workflows geprüft).`,
+        metadata: { webPath: `/instances/${inst.id}` },
+      });
+    }
     return { skipped: false as const, ...stats };
   } catch (e) {
     // Fertige Texte würden die Sprache des Servers einfrieren – gespeichert wird eine übersetzbare Meldung
     const msg = packError(e);
+    const rendered = renderError(e, t);
     db.prepare('UPDATE sync_runs SET finished_at=?, ok=0, error=? WHERE id=?').run(Date.now(), msg, runId);
     db.prepare('UPDATE instances SET last_sync_at=?, last_sync_ok=0, last_sync_error=? WHERE id=?').run(Date.now(), msg, instanceId);
     if (inst.last_sync_ok !== 0) {
-      db.prepare('INSERT INTO events (instance_id, kind, detail, created_at) VALUES (?,?,?,?)').run(instanceId, 'sync_error', msg, Date.now());
+      const ev = db.prepare('INSERT INTO events (instance_id, kind, detail, created_at) VALUES (?,?,?,?)').run(instanceId, 'sync_error', msg, Date.now());
+      emitNotify({
+        eventUid: `core:event:${Number(ev.lastInsertRowid)}`,
+        instanceId: inst.id,
+        instanceName: inst.name,
+        instanceColor: inst.color,
+        kind: 'sync_error',
+        severity: 'critical',
+        title: `Sync fehlgeschlagen: ${inst.name}`,
+        body: rendered,
+        metadata: { errorMessage: rendered, webPath: `/instances/${inst.id}` },
+      });
     }
     throw e;
   } finally {

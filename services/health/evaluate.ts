@@ -78,13 +78,21 @@ export function toAlert(r: AlertRow): HealthAlert {
  * - Warnungen für ältere Versionen (z. B. nach Rollback) oder ohne Anstieg → erledigt
  * Eine vom Nutzer ausgeblendete Warnung bleibt ausgeblendet.
  */
-export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string) {
+export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string, instanceColor = '#ea4b71') {
   const s = getSettings();
   const result = analyze(t.versions, loadExecs(t.instanceId, t.n8nId), s);
   const latest = result.versions[0];
   const now = Date.now();
 
+  const prevOpen = db
+    .prepare("SELECT * FROM alerts WHERE workflow_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1")
+    .get(t.workflowId) as AlertRow | undefined;
+
   if (latest && latest.regression && s.alerts && !t.deleted) {
+    const prevForVersion = db
+      .prepare('SELECT id, status, rate, failed FROM alerts WHERE workflow_id = ? AND version_id = ?')
+      .get(t.workflowId, latest.versionId) as { id: number; status: HealthAlert['status']; rate: number; failed: number } | undefined;
+
     db.prepare(
       `INSERT INTO alerts (workflow_id, workflow_name, instance_id, instance_name, version_id, version_number, rate, total, failed,
                            baseline_rate, baseline_total, rollback_version_id, rollback_number, failing_nodes, status, created_at, updated_at)
@@ -101,11 +109,81 @@ export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string) {
       latest.baseline?.rate ?? 0, latest.baseline?.total ?? 0, latest.rollback?.versionId ?? null, latest.rollback?.number ?? null,
       JSON.stringify(latest.failingNodes.slice(0, 5)), now, now,
     );
+
+    const saved = db
+      .prepare('SELECT * FROM alerts WHERE workflow_id = ? AND version_id = ?')
+      .get(t.workflowId, latest.versionId) as AlertRow | undefined;
+    if (saved && saved.status === 'open') {
+      const newlyOpened = !prevForVersion || prevForVersion.status === 'resolved';
+      const escalated =
+        !newlyOpened &&
+        prevForVersion?.status === 'open' &&
+        latest.failed >= prevForVersion.failed + 5 &&
+        (latest.rate ?? 0) - prevForVersion.rate >= 0.1;
+      if (newlyOpened || escalated) {
+        const pct = Math.round((latest.rate ?? 0) * 100);
+        const basePct = Math.round((latest.baseline?.rate ?? 0) * 100);
+        const topNode = latest.failingNodes[0]?.name;
+        const rollbackHint = latest.rollback ? ` · Stabile Version: v${latest.rollback.number}` : '';
+        core.notifyIngest({
+          groupKey: `alert:${saved.id}`,
+          instanceId: t.instanceId,
+          instanceName,
+          instanceColor,
+          workflowId: t.workflowId,
+          workflowName: t.name,
+          versionId: latest.versionId,
+          versionNumber: latest.number,
+          alertId: saved.id,
+          kind: newlyOpened ? 'alert_opened' : 'alert_escalated',
+          severity: 'critical',
+          title: `Fehlerquote gestiegen: ${t.name} (v${latest.number})`,
+          body: `${pct} % der Läufe schlagen fehl (${latest.failed}/${latest.total}, vorher ${basePct} %)${topNode ? ` · Node: ${topNode}` : ''}${rollbackHint}`,
+          metadata: {
+            rate: latest.rate ?? 0,
+            total: latest.total,
+            failed: latest.failed,
+            baselineRate: latest.baseline?.rate ?? 0,
+            baselineTotal: latest.baseline?.total ?? 0,
+            rollback: latest.rollback,
+            failingNodes: latest.failingNodes.slice(0, 5),
+            webPath: `/workflows/${t.workflowId}`,
+          },
+          createdAt: now,
+        });
+      }
+    }
   }
-  db.prepare(
-    `UPDATE alerts SET status = 'resolved', updated_at = ?
-      WHERE workflow_id = ? AND status = 'open' AND (version_id != ? OR ?)`,
-  ).run(now, t.workflowId, latest?.versionId ?? -1, latest?.regression && s.alerts && !t.deleted ? 0 : 1);
+  const resolved = db
+    .prepare(
+      `UPDATE alerts SET status = 'resolved', updated_at = ?
+        WHERE workflow_id = ? AND status = 'open' AND (version_id != ? OR ?)`,
+    )
+    .run(now, t.workflowId, latest?.versionId ?? -1, latest?.regression && s.alerts && !t.deleted ? 0 : 1);
+
+  if (resolved.changes > 0 && prevOpen && (!latest || !latest.regression || prevOpen.version_id !== latest.versionId)) {
+    core.notifyIngest({
+      instanceId: t.instanceId,
+      instanceName,
+      instanceColor,
+      workflowId: t.workflowId,
+      workflowName: t.name,
+      versionId: latest?.versionId ?? null,
+      versionNumber: latest?.number ?? null,
+      alertId: prevOpen.id,
+      kind: 'alert_resolved',
+      severity: 'info',
+      title: `Entwarnung: ${t.name}`,
+      body: latest ? `Mit v${latest.number} wieder stabil (${Math.round((latest.rate ?? 0) * 100)} % Fehlerquote).` : 'Die offene Warnung wurde aufgelöst.',
+      metadata: {
+        rate: latest?.rate ?? 0,
+        total: latest?.total ?? 0,
+        failed: latest?.failed ?? 0,
+        webPath: `/workflows/${t.workflowId}`,
+      },
+      createdAt: now,
+    });
+  }
 
   const alert = db.prepare("SELECT * FROM alerts WHERE workflow_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1").get(t.workflowId) as
     | AlertRow
@@ -114,7 +192,7 @@ export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string) {
 }
 
 /** Nach jedem Abruf: alle Workflows der Instanz neu bewerten, die im Betrachtungszeitraum liefen. */
-export async function evaluateInstance(instanceId: number, instanceName: string) {
+export async function evaluateInstance(instanceId: number, instanceName: string, instanceColor = '#ea4b71') {
   const since = Date.now() - getSettings().lookbackDays * 864e5;
   const ran = new Set(
     (
@@ -128,9 +206,11 @@ export async function evaluateInstance(instanceId: number, instanceName: string)
       (r) => r.workflow_id,
     ),
   );
-  for (const t of await core.instanceTimeline(instanceId)) {
-    if (ran.has(t.n8nId) || open.has(t.workflowId)) evaluateWorkflow(t, instanceName);
+  const timelines = await core.instanceTimeline(instanceId);
+  for (const t of timelines) {
+    if (ran.has(t.n8nId) || open.has(t.workflowId)) evaluateWorkflow(t, instanceName, instanceColor);
   }
+  return timelines;
 }
 
 export async function workflowHealth(workflowId: number): Promise<WorkflowHealth> {
