@@ -4,12 +4,17 @@ import de.flown8tive.flowvault.notify.model.ApiErrorDto
 import de.flown8tive.flowvault.notify.model.BootstrapDto
 import de.flown8tive.flowvault.notify.model.DeviceDto
 import de.flown8tive.flowvault.notify.model.DeviceUpdateDto
+import de.flown8tive.flowvault.notify.model.DiagnosisResponseDto
 import de.flown8tive.flowvault.notify.model.FlowVaultJson
 import de.flown8tive.flowvault.notify.model.MessageDto
 import de.flown8tive.flowvault.notify.model.MessagesResponseDto
 import de.flown8tive.flowvault.notify.model.PairRequestDto
 import de.flown8tive.flowvault.notify.model.PairedResponseDto
 import de.flown8tive.flowvault.notify.model.ReadRequestDto
+import de.flown8tive.flowvault.notify.model.RollbackChallengeDto
+import de.flown8tive.flowvault.notify.model.RollbackChallengeRequestDto
+import de.flown8tive.flowvault.notify.model.RollbackExecuteRequestDto
+import de.flown8tive.flowvault.notify.model.RollbackExecuteResponseDto
 import de.flown8tive.flowvault.notify.model.RuleDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -71,8 +76,21 @@ class FlowVaultApi {
             .header("Authorization", "Bearer $token")
             .header("Accept", "application/json")
 
-    suspend fun pair(serverUrl: String, code: String, deviceName: String): PairedResponseDto {
-        val body = FlowVaultJson.encodeToString(PairRequestDto(code = code, deviceName = deviceName)).toRequestBody(jsonMediaType)
+    suspend fun pair(
+        serverUrl: String,
+        code: String,
+        deviceName: String,
+        signingPublicKey: String? = null,
+        encryptionPublicKey: String? = null,
+    ): PairedResponseDto {
+        val body = FlowVaultJson.encodeToString(
+            PairRequestDto(
+                code = code,
+                deviceName = deviceName,
+                signingPublicKey = signingPublicKey,
+                encryptionPublicKey = encryptionPublicKey,
+            ),
+        ).toRequestBody(jsonMediaType)
         val req = Request.Builder()
             .url(buildUrl(serverUrl, "/pair"))
             .header("Accept", "application/json")
@@ -119,6 +137,31 @@ class FlowVaultApi {
     suspend fun dismissAlert(serverUrl: String, token: String, alertId: Int) {
         val body = "{}".toRequestBody(jsonMediaType)
         execute<Unit>(authRequest(serverUrl, token, "/alerts/$alertId/dismiss").post(body).build())
+    }
+
+    suspend fun analyzeMessage(serverUrl: String, token: String, seq: Long): DiagnosisResponseDto {
+        val body = "{}".toRequestBody(jsonMediaType)
+        return execute(authRequest(serverUrl, token, "/messages/$seq/analyze").post(body).build())
+    }
+
+    suspend fun requestRollbackChallenge(
+        serverUrl: String,
+        token: String,
+        workflowId: Int,
+        targetVersionId: Int,
+    ): RollbackChallengeDto {
+        val body = FlowVaultJson.encodeToString(RollbackChallengeRequestDto(workflowId, targetVersionId)).toRequestBody(jsonMediaType)
+        return execute(authRequest(serverUrl, token, "/actions/rollback/challenge").post(body).build())
+    }
+
+    suspend fun executeRollback(
+        serverUrl: String,
+        token: String,
+        challengeId: String,
+        signature: String,
+    ): RollbackExecuteResponseDto {
+        val body = FlowVaultJson.encodeToString(RollbackExecuteRequestDto(challengeId, signature)).toRequestBody(jsonMediaType)
+        return execute(authRequest(serverUrl, token, "/actions/rollback/execute").post(body).build())
     }
 
     suspend fun unpair(serverUrl: String, token: String) {

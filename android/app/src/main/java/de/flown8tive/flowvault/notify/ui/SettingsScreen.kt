@@ -198,10 +198,16 @@ fun SettingsScreen(
                 }
             }
 
-            SettingsCard("Verbindung & Gerät") {
+            SettingsCard("Verbindung, Kryptografie & Gerät") {
                 Text("Server: ${prefs.serverUrl ?: "-"}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
                 Text("Gerät: ${prefs.deviceName} (ID #${prefs.deviceId})", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
                 Text("FlowVault-Version: ${prefs.serverVersion.ifBlank { "unbekannt" }}", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
+                Text("Diagnose-Verschlüsselung: Ende-zu-Ende (ECDH P-256 + AES-256-GCM)", style = MaterialTheme.typography.bodySmall, color = FvColors.Add)
+                Text(
+                    "Signiertes Rollback: ${if (prefs.allowRollback) "Aktiv (Hardware-Keystore + Biometrie)" else "Gesperrt (in FlowVault Web freigeben)"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (prefs.allowRollback) FvColors.Add else FvColors.Muted,
+                )
                 Text("Schwärzung: ${prefs.redactionMode}", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
                 Spacer(Modifier.height(4.dp))
                 Button(

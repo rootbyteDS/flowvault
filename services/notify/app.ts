@@ -51,7 +51,6 @@ export function createApp(opts: {
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-  // Alles außer /healthz erfordert NOTIFY_TOKEN vom Core
   app.use((req, res, next) => {
     if (sameSecret(req.headers['x-internal-token'], opts.serviceToken())) return next();
     res.status(401).json({ error: requestT(req)('errors.http.internalToken') });
@@ -69,9 +68,7 @@ export function createApp(opts: {
     for (const dev of devices) {
       if (dev.instances !== null && !dev.instances.includes(message.instance.id)) continue;
       const redacted = redactMessage(message, dev.redactionMode);
-      // SSE-Stream bekommt auch stille Updates (z. B. Burst-Zähler, KI-Text)
       const deliveredSse = hub.sendToDevice(dev.id, eventName, redacted, redacted.updatedSeq);
-      // UnifiedPush Zero-Payload-Wakeup nur wenn relevant und Push aktiv
       if (shouldPush && dev.pushType === 'unifiedpush' && dev.pushEndpoint && store.shouldNotifyDevice(dev, message)) {
         if (deliveredSse === 0 || message.kind === 'test') {
           void push.sendWakeup(dev.pushEndpoint, redacted.updatedSeq);
@@ -96,6 +93,13 @@ export function createApp(opts: {
     const origin = String(req.headers['x-flowvault-origin'] ?? 'http://127.0.0.1:4000');
     const created = await store.createPairing(req.body ?? {}, origin);
     res.status(201).json(created);
+  });
+
+  app.patch('/v1/admin/devices/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new HttpError(400, 'errors.http.invalidId');
+    const updated = store.setDeviceRollback(id, !!req.body?.allowRollback);
+    res.json(publicDevice(updated));
   });
 
   app.delete('/v1/admin/devices/:id', (req, res) => {
@@ -246,6 +250,8 @@ export function createApp(opts: {
       pushType: b.pushType,
       pushEndpoint,
       quietHours: b.quietHours,
+      signingPublicKey: b.signingPublicKey,
+      encryptionPublicKey: b.encryptionPublicKey,
     });
     res.json(publicDevice(updated));
   });
@@ -260,7 +266,6 @@ export function createApp(opts: {
     const device = res.locals.device as DeviceRecord;
     const alertId = Number(req.params.alertId);
     if (!Number.isSafeInteger(alertId) || alertId <= 0) throw new HttpError(400, 'errors.http.invalidId');
-    // Prüfe Instanz-Geltungsbereich gegen offene Warnungen
     const open = await core.openAlerts();
     const target = open.find((a) => a.id === alertId);
     if (!target) throw new HttpError(404, 'errors.notify.alertNotFound');
@@ -269,6 +274,60 @@ export function createApp(opts: {
     }
     await core.dismissAlert(alertId);
     res.json({ ok: true });
+  });
+
+  // Ende-zu-Ende-verschlüsselte Ursachenanalyse für eine Fehlermeldung
+  app.post('/mobile/v1/messages/:seq/analyze', async (req, res) => {
+    const device = res.locals.device as DeviceRecord;
+    const seq = Number(req.params.seq);
+    if (!Number.isSafeInteger(seq) || seq <= 0) throw new HttpError(400, 'errors.http.invalidId');
+    const msg = store.getMessageForDevice(device, seq);
+    if (!msg) throw new HttpError(404, 'errors.notify.messageNotFound');
+    if (!msg.workflow) throw new HttpError(400, 'errors.notify.workflowMissing');
+
+    const topFailing = msg.metadata.failingNodes?.[0];
+    const out = await core.diagnose({
+      workflowId: msg.workflow.id,
+      versionId: msg.version?.id ?? null,
+      rollbackVersionId: msg.metadata.rollback?.versionId ?? null,
+      errorNode: msg.metadata.errorNode ?? topFailing?.name ?? null,
+      errorMessage: msg.metadata.errorMessage ?? topFailing?.lastMessage ?? msg.body,
+      language: device.language,
+      encryptionPublicKey: device.encryptionPublicKey,
+    });
+    if (device.instances !== null && !device.instances.includes(out.instanceId)) {
+      throw new HttpError(403, 'errors.notify.instanceForbidden');
+    }
+    res.json({
+      encrypted: out.encrypted,
+      envelope: out.envelope,
+      diagnosis: out.diagnosis,
+    });
+  });
+
+  // Schritt 1 für kryptografisch signiertes Rollback: 60s Einmal-Challenge anfordern
+  app.post('/mobile/v1/actions/rollback/challenge', async (req, res) => {
+    const device = res.locals.device as DeviceRecord;
+    const workflowId = Number(req.body?.workflowId);
+    const targetVersionId = Number(req.body?.targetVersionId);
+    if (!Number.isSafeInteger(workflowId) || workflowId <= 0 || !Number.isSafeInteger(targetVersionId) || targetVersionId <= 0) {
+      throw new HttpError(400, 'errors.http.invalidId');
+    }
+    const preview = await core.rollbackPreview(workflowId, targetVersionId);
+    const challenge = store.createRollbackChallenge(device, preview);
+    res.status(201).json(challenge);
+  });
+
+  // Schritt 2: Biometrisch erzeugte Hardware-ECDSA-Signatur prüfen und Rollback im Core ausführen
+  app.post('/mobile/v1/actions/rollback/execute', async (req, res) => {
+    const device = res.locals.device as DeviceRecord;
+    const challengeId = String(req.body?.challengeId ?? '').trim();
+    const signature = String(req.body?.signature ?? '').trim();
+    if (!challengeId || !signature) throw new HttpError(400, 'errors.notify.signatureInvalid');
+
+    const verified = store.consumeRollbackChallenge(device, challengeId, signature);
+    const result = await core.executeRollback({ ...verified, signature });
+    res.json(result);
   });
 
   app.delete('/mobile/v1/device', (_req, res) => {

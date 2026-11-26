@@ -9,6 +9,7 @@ import de.flown8tive.flowvault.notify.data.ConnectionState
 import de.flown8tive.flowvault.notify.data.MessageEntity
 import de.flown8tive.flowvault.notify.model.DeliveryMode
 import de.flown8tive.flowvault.notify.model.QuietHoursDto
+import de.flown8tive.flowvault.notify.model.RollbackChallengeDto
 import de.flown8tive.flowvault.notify.push.UnifiedPushManager
 import de.flown8tive.flowvault.notify.service.RealtimeSyncService
 import de.flown8tive.flowvault.notify.service.SyncWorker
@@ -34,12 +35,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
+    private val _analyzingSeqs = MutableStateFlow<Set<Long>>(emptySet())
+    val analyzingSeqs: StateFlow<Set<Long>> = _analyzingSeqs.asStateFlow()
+
+    private val _pendingRollback = MutableStateFlow<RollbackChallengeDto?>(null)
+    val pendingRollback: StateFlow<RollbackChallengeDto?> = _pendingRollback.asStateFlow()
+
+    private val _rollbackBusy = MutableStateFlow(false)
+    val rollbackBusy: StateFlow<Boolean> = _rollbackBusy.asStateFlow()
+
     private val _bannerMessage = MutableStateFlow<String?>(null)
     val bannerMessage: StateFlow<String?> = _bannerMessage.asStateFlow()
 
     private val _activeInstanceId = MutableStateFlow<Int?>(null)
 
     val connectionState: StateFlow<ConnectionState> = repo.connectionState
+    val allowRollback: StateFlow<Boolean> = repo.allowRollbackFlow
     val channels: StateFlow<List<ChannelEntity>> = repo.channelsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val openAlerts: StateFlow<List<MessageEntity>> = repo.openAlertMessagesFlow
@@ -57,6 +68,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearBanner() {
         _bannerMessage.value = null
+    }
+
+    fun showBanner(msg: String) {
+        _bannerMessage.value = msg
     }
 
     fun setActiveInstance(instanceId: Int?) {
@@ -100,6 +115,55 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _bannerMessage.value = e.message ?: "Sync fehlgeschlagen"
             } finally {
                 _busy.value = false
+            }
+        }
+    }
+
+    fun analyzeMessage(seq: Long) {
+        if (_analyzingSeqs.value.contains(seq)) return
+        viewModelScope.launch {
+            _analyzingSeqs.value = _analyzingSeqs.value + seq
+            try {
+                repo.analyzeMessage(seq)
+            } catch (e: Exception) {
+                _bannerMessage.value = e.message ?: "Fehleranalyse fehlgeschlagen"
+            } finally {
+                _analyzingSeqs.value = _analyzingSeqs.value - seq
+            }
+        }
+    }
+
+    fun requestRollback(workflowId: Int, targetVersionId: Int) {
+        if (_rollbackBusy.value) return
+        viewModelScope.launch {
+            _rollbackBusy.value = true
+            try {
+                val challenge = repo.requestRollbackChallenge(workflowId, targetVersionId)
+                _pendingRollback.value = challenge
+            } catch (e: Exception) {
+                _bannerMessage.value = e.message ?: "Rollback konnte nicht vorbereitet werden"
+            } finally {
+                _rollbackBusy.value = false
+            }
+        }
+    }
+
+    fun cancelRollback() {
+        _pendingRollback.value = null
+    }
+
+    fun executeConfirmedRollback(challenge: RollbackChallengeDto) {
+        viewModelScope.launch {
+            _rollbackBusy.value = true
+            try {
+                val res = repo.executeSignedRollback(challenge)
+                _pendingRollback.value = null
+                _bannerMessage.value = "Version v${res.restoredFromNumber} erfolgreich in n8n zurückgespielt"
+            } catch (e: Exception) {
+                _pendingRollback.value = null
+                _bannerMessage.value = e.message ?: "Rollback fehlgeschlagen"
+            } finally {
+                _rollbackBusy.value = false
             }
         }
     }
@@ -195,7 +259,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startForegroundStream() {
         if (!prefs.isPaired) return
-        if (prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) return // Läuft bereits im Service
+        if (prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) return
         val url = prefs.serverUrl ?: return
         val token = prefs.deviceToken ?: return
         foregroundStream?.cancel()

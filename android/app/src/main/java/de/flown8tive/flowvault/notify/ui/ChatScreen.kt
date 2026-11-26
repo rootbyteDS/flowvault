@@ -6,10 +6,13 @@ import android.content.Context
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,9 +31,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -60,6 +71,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import de.flown8tive.flowvault.notify.data.MessageEntity
+import de.flown8tive.flowvault.notify.model.DiagnosisDto
 import de.flown8tive.flowvault.notify.model.MessageCategoryHelper
 import de.flown8tive.flowvault.notify.model.MessageDto
 import de.flown8tive.flowvault.notify.ui.theme.FvColors
@@ -73,21 +87,32 @@ private enum class ChatFilter(val label: String) {
     CHANGES("Änderungen"),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private data class UiChatMessage(
+    val dto: MessageDto,
+    val diagnosis: DiagnosisDto?,
+)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
     vm: AppViewModel,
-    instanceId: Int?, // null = Offene kritische Warnungen über alle Instanzen
+    instanceId: Int?,
     title: String,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val rawMessages by remember(instanceId) {
+    val activity = context as? FragmentActivity
+    val rawMessages: List<MessageEntity> by remember(instanceId) {
         if (instanceId != null) vm.messagesForInstance(instanceId) else vm.openAlerts
     }.collectAsState(initial = emptyList())
 
+    val allowRollback by vm.allowRollback.collectAsState()
+    val analyzingSeqs by vm.analyzingSeqs.collectAsState()
+    val pendingRollback by vm.pendingRollback.collectAsState()
+    val rollbackBusy by vm.rollbackBusy.collectAsState()
+
     var filter by remember { mutableStateOf(ChatFilter.ALL) }
-    var selectedDetail by remember { mutableStateOf<MessageDto?>(null) }
+    var selectedDetail by remember { mutableStateOf<UiChatMessage?>(null) }
     val listState = rememberLazyListState()
 
     DisposableEffect(instanceId) {
@@ -96,11 +121,11 @@ fun ChatScreen(
     }
 
     val messages = remember(rawMessages, filter) {
-        rawMessages.map { it.toDto() }.filter { m ->
+        rawMessages.map { UiChatMessage(it.toDto(), it.decodedDiagnosis()) }.filter { m ->
             when (filter) {
                 ChatFilter.ALL -> true
-                ChatFilter.FAILS -> MessageCategoryHelper.isFail(m.kind) || MessageCategoryHelper.isRecovery(m.kind)
-                ChatFilter.CHANGES -> MessageCategoryHelper.isChange(m.kind)
+                ChatFilter.FAILS -> MessageCategoryHelper.isFail(m.dto.kind) || MessageCategoryHelper.isRecovery(m.dto.kind)
+                ChatFilter.CHANGES -> MessageCategoryHelper.isChange(m.dto.kind)
             }
         }
     }
@@ -168,11 +193,28 @@ fun ChatScreen(
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(messages, key = { it.seq }) { msg ->
+                    items(messages, key = { it.dto.seq }) { item ->
+                        val msg = item.dto
+                        val rollbackVerId = msg.metadata.rollback?.versionId ?: item.diagnosis?.rollbackVersionId
+                        val rollbackVerNum = msg.metadata.rollback?.number ?: item.diagnosis?.rollbackVersionNumber
                         MessengerCard(
                             msg = msg,
+                            diagnosis = item.diagnosis,
+                            isAnalyzing = analyzingSeqs.contains(msg.seq),
+                            allowRollback = allowRollback,
+                            rollbackBusy = rollbackBusy,
+                            rollbackVersionNumber = rollbackVerNum,
                             showInstance = instanceId == null,
-                            onClick = { selectedDetail = msg },
+                            onClick = { selectedDetail = item },
+                            onAnalyze = { vm.analyzeMessage(msg.seq) },
+                            onRollback = {
+                                val wfId = msg.workflow?.id
+                                if (!allowRollback) {
+                                    vm.showBanner("Rollback in FlowVault Web unter „Einstellungen → Mobile App“ für dieses Gerät freischalten.")
+                                } else if (wfId != null && rollbackVerId != null) {
+                                    vm.requestRollback(wfId, rollbackVerId)
+                                }
+                            },
                             onOpenWeb = { openInWeb(context, vm.prefs.serverUrl, msg.metadata.webPath) },
                             onDismissAlert = { msg.alertId?.let { vm.dismissAlert(it) } },
                             onMuteWorkflow = { msg.workflow?.id?.let { vm.muteWorkflow(it, 3_600_000L) } },
@@ -183,7 +225,72 @@ fun ChatScreen(
         }
     }
 
-    selectedDetail?.let { msg ->
+    // Bestätigungsdialog + Biometrische Hardware-Signatur vor dem Zurückspielen in n8n
+    pendingRollback?.let { ch ->
+        AlertDialog(
+            onDismissRequest = { if (!rollbackBusy) vm.cancelRollback() },
+            containerColor = FvColors.Panel,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Fingerprint, contentDescription = null, tint = FvColors.AccentHi)
+                    Text("Version v${ch.targetVersionNumber} zurückspielen?", color = FvColors.Text)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Instanz: ${ch.instanceName}\nWorkflow: ${ch.workflowName}\nAktuell: v${ch.currentVersionNumber} → Ziel: v${ch.targetVersionNumber}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FvColors.Text,
+                    )
+                    Text(
+                        "Der Auftrag wird mit dem Hardware-Schlüssel dieses Geräts (Android Keystore) signiert und überschreibt den Workflow in n8n als neue Version. Es werden die heutigen Zugangsdaten der referenzierten Credentials genutzt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FvColors.Muted,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = !rollbackBusy,
+                    colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
+                    onClick = {
+                        if (activity == null) {
+                            vm.showBanner("Biometrische Bestätigung nicht verfügbar")
+                            return@Button
+                        }
+                        BiometricAuthHelper.authenticateForRollback(
+                            activity = activity,
+                            title = "Auf v${ch.targetVersionNumber} zurückspielen",
+                            subtitle = "${ch.instanceName} · ${ch.workflowName}",
+                            description = "Bestätige das signierte Zurückspielen von v${ch.currentVersionNumber} auf v${ch.targetVersionNumber}.",
+                            onAuthorized = { vm.executeConfirmedRollback(ch) },
+                            onError = { err -> vm.showBanner(err) },
+                        )
+                    },
+                ) {
+                    if (rollbackBusy) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = FvColors.Text)
+                    } else {
+                        Text("Mit Biometrie bestätigen")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !rollbackBusy, onClick = { vm.cancelRollback() }) {
+                    Text("Abbrechen", color = FvColors.Muted)
+                }
+            },
+        )
+    }
+
+    selectedDetail?.let { item ->
+        val msg = item.dto
+        // Halte Diagnose auch im geöffneten Bottom-Sheet live aktuell
+        val liveDiag = messages.firstOrNull { it.dto.seq == msg.seq }?.diagnosis ?: item.diagnosis
+        val rollbackVerId = msg.metadata.rollback?.versionId ?: liveDiag?.rollbackVersionId
+        val rollbackVerNum = msg.metadata.rollback?.number ?: liveDiag?.rollbackVersionNumber
+
         ModalBottomSheet(
             onDismissRequest = { selectedDetail = null },
             containerColor = FvColors.Panel,
@@ -223,7 +330,26 @@ fun ChatScreen(
                         )
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                liveDiag?.let { DiagnosisBox(it) }
+
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (MessageCategoryHelper.isFail(msg.kind) && msg.workflow != null) {
+                        AssistChip(
+                            onClick = { vm.analyzeMessage(msg.seq) },
+                            label = { Text(if (analyzingSeqs.contains(msg.seq)) "Analysiere…" else "Ursache analysieren") },
+                            leadingIcon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        )
+                    }
+                    if (msg.workflow != null && rollbackVerId != null && rollbackVerNum != null && allowRollback) {
+                        AssistChip(
+                            onClick = {
+                                selectedDetail = null
+                                vm.requestRollback(msg.workflow.id, rollbackVerId)
+                            },
+                            label = { Text("Auf v$rollbackVerNum zurückspielen") },
+                            leadingIcon = { Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        )
+                    }
                     AssistChip(
                         onClick = {
                             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -246,11 +372,19 @@ fun ChatScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MessengerCard(
     msg: MessageDto,
+    diagnosis: DiagnosisDto?,
+    isAnalyzing: Boolean,
+    allowRollback: Boolean,
+    rollbackBusy: Boolean,
+    rollbackVersionNumber: Int?,
     showInstance: Boolean,
     onClick: () -> Unit,
+    onAnalyze: () -> Unit,
+    onRollback: () -> Unit,
     onOpenWeb: () -> Unit,
     onDismissAlert: () -> Unit,
     onMuteWorkflow: () -> Unit,
@@ -331,10 +465,49 @@ private fun MessengerCard(
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            diagnosis?.let { DiagnosisBox(it) }
+
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (MessageCategoryHelper.isFail(msg.kind) && msg.workflow != null) {
+                    TextButton(
+                        onClick = onAnalyze,
+                        enabled = !isAnalyzing,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        if (isAnalyzing) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp, color = FvColors.AccentHi)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Analysiere…", style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
+                        } else {
+                            Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(14.dp), tint = FvColors.AccentHi)
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (diagnosis == null) "Ursache analysieren" else "Neu analysieren", style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
+                        }
+                    }
+                }
+                if (msg.workflow != null && rollbackVersionNumber != null && msg.resolvedBySeq == null) {
+                    TextButton(
+                        onClick = onRollback,
+                        enabled = !rollbackBusy,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Icon(
+                            if (allowRollback) Icons.Default.Fingerprint else Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (allowRollback) FvColors.Add else FvColors.Dim,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Auf v$rollbackVersionNumber zurückspielen",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (allowRollback) FvColors.Add else FvColors.Dim,
+                        )
+                    }
+                }
                 if (!msg.metadata.webPath.isNullOrBlank()) {
                     TextButton(onClick = onOpenWeb, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-                        Text("Im Web öffnen", style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
+                        Text("Im Web öffnen", style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
                     }
                 }
                 if ((msg.kind == "alert_opened" || msg.kind == "alert_escalated") && msg.alertId != null && msg.resolvedBySeq == null) {
@@ -348,6 +521,37 @@ private fun MessengerCard(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosisBox(diag: DiagnosisDto) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(FvColors.Panel3)
+            .border(1.dp, FvColors.Accent.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(12.dp), tint = FvColors.Add)
+            Text(
+                if (diag.source == "ai") "KI-DIAGNOSE · E2E-VERSCHLÜSSELT" else "DIFF-DIAGNOSE · E2E-VERSCHLÜSSELT",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = FvColors.AccentHi,
+            )
+        }
+        Text(diag.headline, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
+        Text(diag.cause, style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
+        diag.culpritChange?.let { culprit ->
+            Text("Auslösende Änderung: $culprit", style = MaterialTheme.typography.bodySmall, color = FvColors.Mod)
+        }
+        diag.suggestedFix.forEach { step ->
+            Text("→ $step", style = MaterialTheme.typography.bodySmall, color = FvColors.Text)
         }
     }
 }

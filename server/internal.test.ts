@@ -139,6 +139,23 @@ test('the Notify token can read metadata and dismiss alerts, but cannot access n
   assert.equal((await asNotify('/instances')).status, 200);
   assert.equal((await asNotify('/health/alerts')).status, 200);
   assert.equal((await asNotify('/health/alerts/1/dismiss', { method: 'POST', body: '{}' })).status, 200);
+  assert.equal((await asNotify('/workflows/10/rollback-preview?versionId=100')).status, 200);
+  // Rollback ohne gültige ECDSA-Gerätesignatur lehnt der Core selbst ab
+  assert.equal(
+    (await asNotify('/actions/rollback', {
+      method: 'POST',
+      body: JSON.stringify({
+        challengeId: 'c1',
+        nonce: 'n1',
+        deviceId: 1,
+        workflowId: 10,
+        targetVersionId: 100,
+        signingPublicKey: 'invalid',
+        signature: 'invalid',
+      }),
+    })).status,
+    403,
+  );
   assert.equal((await asNotify('/instances/1/executions')).status, 403);
   assert.equal((await asNotify('/notify/ingest', { method: 'POST', body: '{}' })).status, 403);
 });

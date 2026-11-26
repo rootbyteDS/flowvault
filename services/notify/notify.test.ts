@@ -4,6 +4,7 @@
  * stilles KI-Update, Redaction (Kanarienwerte), Ruhezeiten, Alert-Dismiss, SSE-Stream & UnifiedPush-SSRF.
  */
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import type { AddressInfo } from 'node:net';
@@ -12,11 +13,26 @@ import { createApp } from './app.ts';
 import { createSseHub } from './hub.ts';
 import { createPushSender, validatePushEndpoint } from './push.ts';
 import { createStore, isInQuietHours } from './store.ts';
+import {
+  canonicalRollbackPayload,
+  decryptWithPrivateKey,
+  encryptForDevice,
+  verifyDeviceSignature,
+} from '../../shared/mobile-crypto.ts';
 import type { CoreClient } from './core.ts';
-import type { NotifyBootstrap, NotifyMessage, NotifyPairedResponse, NotifyPairingCreated } from '../../shared/notify.ts';
+import type {
+  DiagnosisResponse,
+  DiagnosisResult,
+  NotifyBootstrap,
+  NotifyMessage,
+  NotifyPairedResponse,
+  NotifyPairingCreated,
+  RollbackChallenge,
+} from '../../shared/notify.ts';
 
 const SERVICE_TOKEN = 'core-to-notify-test-token';
 const dismissedAlerts: number[] = [];
+const executedRollbacks: { workflowId: number; targetVersionId: number; verifiedByCore: boolean }[] = [];
 const pushLog: { endpoint: string; seq: number }[] = [];
 
 const fakeCore: CoreClient = {
@@ -72,6 +88,44 @@ const fakeCore: CoreClient = {
   },
   async dismissAlert(alertId: number) {
     dismissedAlerts.push(alertId);
+  },
+  async rollbackPreview(workflowId: number, targetVersionId: number) {
+    const instanceId = workflowId === 20 ? 2 : 1;
+    return {
+      instanceId,
+      instanceName: instanceId === 1 ? 'Produktion' : 'Staging',
+      workflowId,
+      workflowName: workflowId === 10 ? 'Daily KPI' : 'Staging Job',
+      currentVersionNumber: 14,
+      targetVersionId,
+      targetVersionNumber: 13,
+    };
+  },
+  async diagnose(input) {
+    const diag: DiagnosisResult = {
+      source: 'diff',
+      headline: `Fehler an ${input.errorNode ?? 'Node'}`,
+      cause: 'HTTP 401 – API-Schlüssel abgelehnt.',
+      culpritChange: 'Node „Stripe“ wurde in v14 geändert (parameters.url).',
+      suggestedFix: ['Credential in n8n prüfen', 'Auf v13 zurückspielen'],
+      recommendRollback: true,
+      rollbackVersionId: input.rollbackVersionId ?? 4,
+      rollbackVersionNumber: 13,
+      analyzedVersionNumber: 14,
+      comparedVersionNumber: 13,
+      generatedAt: Date.now(),
+    };
+    if (input.encryptionPublicKey) {
+      return { instanceId: 1, encrypted: true, envelope: encryptForDevice(diag, input.encryptionPublicKey) };
+    }
+    return { instanceId: 1, encrypted: false, diagnosis: diag };
+  },
+  async executeRollback(input) {
+    const canonical = canonicalRollbackPayload(input);
+    const verifiedByCore = verifyDeviceSignature(input.signingPublicKey, canonical, input.signature);
+    assert.equal(verifiedByCore, true, 'Core independently verifies ECDSA signature');
+    executedRollbacks.push({ workflowId: input.workflowId, targetVersionId: input.targetVersionId, verifiedByCore });
+    return { ok: true, workflowId: input.workflowId, restoredFromNumber: 13 };
   },
 };
 
@@ -341,3 +395,149 @@ test('UnifiedPush SSRF protection blocks metadata, loopback, private IPs by defa
   assert.equal(await sender.sendWakeup('https://push.example.com/topic', 99), true);
   assert.deepEqual(JSON.parse(sentBodies[0]!), { v: 1, t: 'wake', seq: 99 });
 });
+
+test('E2E encrypted failure diagnosis and cryptographically signed biometric rollback', async () => {
+  const signKeys = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const encKeys = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const signSpki = signKeys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const encSpki = encKeys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+  const encPrivPkcs8 = encKeys.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
+
+  // Gerät ohne anfängliche Rollback-Freigabe, beschränkt auf Instanz 1
+  const created = (await (await admin('/pair', {
+    method: 'POST',
+    body: JSON.stringify({ label: 'CryptoPhone', instances: [1], allowRollback: false }),
+  })).json()) as NotifyPairingCreated;
+
+  const paired = (await (await mobile('/pair', undefined, {
+    method: 'POST',
+    body: JSON.stringify({
+      code: created.code,
+      deviceName: 'CryptoPhone',
+      signingPublicKey: signSpki,
+      encryptionPublicKey: encSpki,
+    }),
+  })).json()) as NotifyPairedResponse;
+  assert.equal(paired.allowRollback, false);
+
+  // Fehlermeldung einspeisen & E2E-verschlüsselte Diagnose anfordern
+  const ing = (await (await ingest({
+    instanceId: 1,
+    instanceName: 'Produktion',
+    workflowId: 10,
+    workflowName: 'Daily KPI',
+    versionId: 50,
+    versionNumber: 14,
+    kind: 'alert_opened',
+    title: 'Fehlerquote gestiegen: Daily KPI',
+    body: '45 % schlagen fehl',
+    metadata: { errorNode: 'Stripe', errorMessage: '401 Unauthorized', rollback: { versionId: 49, number: 13, rate: 0 } },
+  })).json()) as { seq: number };
+
+  const diagRes = await mobile(`/messages/${ing.seq}/analyze`, paired.token, { method: 'POST' });
+  assert.equal(diagRes.status, 200);
+  const rawBody = await diagRes.text();
+  // Im HTTP-Payload von notify darf der Klartext der Diagnose NICHT vorkommen!
+  assert.ok(!rawBody.includes('API-Schlüssel abgelehnt'), 'diagnosis must be E2E encrypted');
+  const parsedDiag = JSON.parse(rawBody) as DiagnosisResponse;
+  assert.equal(parsedDiag.encrypted, true);
+  assert.ok(parsedDiag.envelope);
+
+  // Nur der private ECDH-Geräteschlüssel kann entschlüsseln; Manipulation am Ciphertext schlägt fehl
+  const decrypted = decryptWithPrivateKey<DiagnosisResult>(parsedDiag.envelope!, encPrivPkcs8);
+  assert.equal(decrypted.recommendRollback, true);
+  assert.equal(decrypted.rollbackVersionNumber, 13);
+  const wrongKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
+  assert.throws(() => decryptWithPrivateKey(parsedDiag.envelope!, wrongKey));
+
+  // Solange allowRollback=false → Challenge wird mit 403 abgelehnt
+  assert.equal(
+    (await mobile('/actions/rollback/challenge', paired.token, {
+      method: 'POST',
+      body: JSON.stringify({ workflowId: 10, targetVersionId: 49 }),
+    })).status,
+    403,
+  );
+
+  // Admin schaltet Rollback für dieses Gerät frei
+  assert.equal(
+    (await admin(`/devices/${paired.deviceId}`, { method: 'PATCH', body: JSON.stringify({ allowRollback: true }) })).status,
+    200,
+  );
+
+  // Fremde Instanz (workflow 20 = Instanz 2) bleibt trotz Rollback-Recht verboten
+  assert.equal(
+    (await mobile('/actions/rollback/challenge', paired.token, {
+      method: 'POST',
+      body: JSON.stringify({ workflowId: 20, targetVersionId: 7 }),
+    })).status,
+    403,
+  );
+
+  // Gültige Challenge für Instanz 1 holen
+  const chRes = await mobile('/actions/rollback/challenge', paired.token, {
+    method: 'POST',
+    body: JSON.stringify({ workflowId: 10, targetVersionId: 49 }),
+  });
+  assert.equal(chRes.status, 201);
+  const challenge = (await chRes.json()) as RollbackChallenge;
+
+  // Falsche Signatur verbraucht die Einmal-Challenge sofort und lehnt ab (403)
+  const wrongSigner = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const badSig = crypto
+    .sign(
+      'sha256',
+      Buffer.from(
+        canonicalRollbackPayload({
+          challengeId: challenge.challengeId,
+          nonce: challenge.nonce,
+          deviceId: paired.deviceId,
+          workflowId: 10,
+          targetVersionId: 49,
+        }),
+        'utf8',
+      ),
+      wrongSigner.privateKey,
+    )
+    .toString('base64');
+  assert.equal(
+    (await mobile('/actions/rollback/execute', paired.token, {
+      method: 'POST',
+      body: JSON.stringify({ challengeId: challenge.challengeId, signature: badSig }),
+    })).status,
+    403,
+  );
+  assert.equal(executedRollbacks.length, 0);
+
+  // Neue Challenge + echte Gerätesignatur → erfolgreich & einmalig (Replay = 401)
+  const ch2 = (await (await mobile('/actions/rollback/challenge', paired.token, {
+    method: 'POST',
+    body: JSON.stringify({ workflowId: 10, targetVersionId: 49 }),
+  })).json()) as RollbackChallenge;
+  const canonical = canonicalRollbackPayload({
+    challengeId: ch2.challengeId,
+    nonce: ch2.nonce,
+    deviceId: paired.deviceId,
+    workflowId: 10,
+    targetVersionId: 49,
+  });
+  const validSig = crypto.sign('sha256', Buffer.from(canonical, 'utf8'), signKeys.privateKey).toString('base64');
+
+  const execRes = await mobile('/actions/rollback/execute', paired.token, {
+    method: 'POST',
+    body: JSON.stringify({ challengeId: ch2.challengeId, signature: validSig }),
+  });
+  assert.equal(execRes.status, 200);
+  assert.equal(executedRollbacks.length, 1);
+  assert.equal(executedRollbacks[0]!.targetVersionId, 49);
+
+  // Replay derselben Signatur/Challenge wird abgewiesen
+  assert.equal(
+    (await mobile('/actions/rollback/execute', paired.token, {
+      method: 'POST',
+      body: JSON.stringify({ challengeId: ch2.challengeId, signature: validSig }),
+    })).status,
+    401,
+  );
+});
+

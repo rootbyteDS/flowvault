@@ -39,6 +39,9 @@ data class DeviceDto(
     val hint: String = "",
     val instances: List<Int>? = null,
     val redactionMode: String = "lockscreen",
+    val allowRollback: Boolean = false,
+    val signingKeyConfigured: Boolean = false,
+    val encryptionKeyConfigured: Boolean = false,
     val pushType: String = "none",
     val pushConfigured: Boolean = false,
     val language: String = "de",
@@ -53,6 +56,8 @@ data class PairRequestDto(
     val deviceName: String,
     val platform: String = "android",
     val language: String = "de",
+    val signingPublicKey: String? = null,
+    val encryptionPublicKey: String? = null,
 )
 
 @Serializable
@@ -62,6 +67,7 @@ data class PairedResponseDto(
     val serverName: String = "FlowVault",
     val serverVersion: String = "",
     val redactionMode: String = "lockscreen",
+    val allowRollback: Boolean = false,
     val allowedInstances: List<Int>? = null,
 )
 
@@ -206,6 +212,72 @@ data class DeviceUpdateDto(
     val pushType: String? = null,
     val pushEndpoint: String? = null,
     val quietHours: QuietHoursDto? = null,
+    val signingPublicKey: String? = null,
+    val encryptionPublicKey: String? = null,
+)
+
+@Serializable
+data class EncryptedEnvelopeDto(
+    val alg: String,
+    val ephemeralPublicKey: String,
+    val salt: String,
+    val iv: String,
+    val ciphertext: String,
+)
+
+@Serializable
+data class DiagnosisDto(
+    val source: String = "diff",
+    val headline: String,
+    val cause: String,
+    val culpritChange: String? = null,
+    val suggestedFix: List<String> = emptyList(),
+    val recommendRollback: Boolean = false,
+    val rollbackVersionId: Int? = null,
+    val rollbackVersionNumber: Int? = null,
+    val analyzedVersionNumber: Int = 1,
+    val comparedVersionNumber: Int? = null,
+    val generatedAt: Long = 0,
+)
+
+@Serializable
+data class DiagnosisResponseDto(
+    val encrypted: Boolean = false,
+    val envelope: EncryptedEnvelopeDto? = null,
+    val diagnosis: DiagnosisDto? = null,
+)
+
+@Serializable
+data class RollbackChallengeRequestDto(
+    val workflowId: Int,
+    val targetVersionId: Int,
+)
+
+@Serializable
+data class RollbackChallengeDto(
+    val challengeId: String,
+    val nonce: String,
+    val expiresAt: Long,
+    val instanceId: Int,
+    val instanceName: String,
+    val workflowId: Int,
+    val workflowName: String,
+    val currentVersionNumber: Int,
+    val targetVersionId: Int,
+    val targetVersionNumber: Int,
+)
+
+@Serializable
+data class RollbackExecuteRequestDto(
+    val challengeId: String,
+    val signature: String,
+)
+
+@Serializable
+data class RollbackExecuteResponseDto(
+    val ok: Boolean = false,
+    val workflowId: Int = 0,
+    val restoredFromNumber: Int = 0,
 )
 
 @Serializable

@@ -73,6 +73,9 @@ export interface NotifyDevice {
   hint: string;
   instances: number[] | null;
   redactionMode: RedactionMode;
+  allowRollback: boolean;
+  signingKeyConfigured: boolean;
+  encryptionKeyConfigured: boolean;
   pushType: PushType;
   pushConfigured: boolean;
   language: string;
@@ -96,6 +99,7 @@ export interface NotifyPairingCreated {
   label: string;
   instances: number[] | null;
   redactionMode: RedactionMode;
+  allowRollback: boolean;
 }
 
 export interface NotifyPairedResponse {
@@ -104,7 +108,56 @@ export interface NotifyPairedResponse {
   serverName: string;
   serverVersion: string;
   redactionMode: RedactionMode;
+  allowRollback: boolean;
   allowedInstances: number[] | null;
+}
+
+export interface EncryptedEnvelope {
+  alg: 'ECDH-P256-HKDF-AES256GCM';
+  ephemeralPublicKey: string;
+  salt: string;
+  iv: string;
+  /** Base64(Ciphertext || 16-Byte GCM AuthTag) */
+  ciphertext: string;
+}
+
+export interface DiagnosisResult {
+  source: 'ai' | 'diff';
+  headline: string;
+  cause: string;
+  culpritChange: string | null;
+  suggestedFix: string[];
+  recommendRollback: boolean;
+  rollbackVersionId: number | null;
+  rollbackVersionNumber: number | null;
+  analyzedVersionNumber: number;
+  comparedVersionNumber: number | null;
+  generatedAt: number;
+}
+
+export interface DiagnosisResponse {
+  encrypted: boolean;
+  envelope?: EncryptedEnvelope;
+  diagnosis?: DiagnosisResult;
+}
+
+export interface RollbackChallenge {
+  challengeId: string;
+  nonce: string;
+  expiresAt: number;
+  instanceId: number;
+  instanceName: string;
+  workflowId: number;
+  workflowName: string;
+  currentVersionNumber: number;
+  targetVersionId: number;
+  targetVersionNumber: number;
+}
+
+export interface RollbackExecuteResult {
+  ok: boolean;
+  workflowId: number;
+  restoredFromNumber: number;
 }
 
 export interface NotifyMessageMetadata {

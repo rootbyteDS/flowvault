@@ -11,6 +11,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import de.flown8tive.flowvault.notify.model.ChannelDto
+import de.flown8tive.flowvault.notify.model.DiagnosisDto
 import de.flown8tive.flowvault.notify.model.FlowVaultJson
 import de.flown8tive.flowvault.notify.model.InstanceRefDto
 import de.flown8tive.flowvault.notify.model.MessageDto
@@ -56,9 +57,12 @@ data class MessageEntity(
     val groupCount: Int,
     val resolvedBySeq: Long?,
     val metadataJson: String,
+    val diagnosisJson: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
 ) {
+    fun decodedDiagnosis(): DiagnosisDto? =
+        diagnosisJson?.let { runCatching { FlowVaultJson.decodeFromString<DiagnosisDto>(it) }.getOrNull() }
     fun toDto(): MessageDto = MessageDto(
         seq = seq,
         updatedSeq = updatedSeq,
@@ -157,6 +161,9 @@ interface NotifyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertMessages(items: List<MessageEntity>)
 
+    @Query("UPDATE messages SET diagnosisJson = :diagnosisJson WHERE seq = :seq")
+    suspend fun saveDiagnosis(seq: Long, diagnosisJson: String)
+
     @Query("UPDATE messages SET resolvedBySeq = :resolvedBySeq WHERE alertId = :alertId AND kind IN ('alert_opened', 'alert_escalated') AND resolvedBySeq IS NULL")
     suspend fun markAlertResolved(alertId: Int, resolvedBySeq: Long)
 
@@ -164,7 +171,7 @@ interface NotifyDao {
     suspend fun clearMessages()
 }
 
-@Database(entities = [ChannelEntity::class, MessageEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ChannelEntity::class, MessageEntity::class], version = 2, exportSchema = false)
 abstract class FlowVaultDatabase : RoomDatabase() {
     abstract fun dao(): NotifyDao
 

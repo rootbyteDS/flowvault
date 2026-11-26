@@ -48,6 +48,18 @@ class SecurePrefs(context: Context) {
         get() = prefs.getString("redaction_mode", "lockscreen") ?: "lockscreen"
         set(value) = prefs.edit().putString("redaction_mode", value).apply()
 
+    var allowRollback: Boolean
+        get() = prefs.getBoolean("allow_rollback", false)
+        set(value) = prefs.edit().putBoolean("allow_rollback", value).apply()
+
+    var e2ePublicKey: String?
+        get() = prefs.getString("e2e_public_key", null)
+        set(value) = prefs.edit().putString("e2e_public_key", value).apply()
+
+    var e2ePrivateKey: String?
+        get() = prefs.getString("e2e_private_key", null)
+        set(value) = prefs.edit().putString("e2e_private_key", value).apply()
+
     var deliveryMode: DeliveryMode
         get() = DeliveryMode.fromWire(prefs.getString("delivery_mode", DeliveryMode.PERIODIC.wireValue))
         set(value) = prefs.edit().putString("delivery_mode", value.wireValue).apply()

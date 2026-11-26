@@ -1,6 +1,7 @@
 package de.flown8tive.flowvault.notify
 
 import android.app.Application
+import de.flown8tive.flowvault.notify.crypto.DeviceCryptoManager
 import de.flown8tive.flowvault.notify.data.FlowVaultApi
 import de.flown8tive.flowvault.notify.data.FlowVaultDatabase
 import de.flown8tive.flowvault.notify.data.NotifyRepository
@@ -19,6 +20,8 @@ class FlowVaultApp : Application() {
         private set
     lateinit var notifications: NotificationHelper
         private set
+    lateinit var crypto: DeviceCryptoManager
+        private set
     lateinit var repository: NotifyRepository
         private set
 
@@ -29,7 +32,8 @@ class FlowVaultApp : Application() {
         api = FlowVaultApi()
         notifications = NotificationHelper(this, prefs)
         notifications.ensureChannels()
-        repository = NotifyRepository(this, prefs, db, api, notifications)
+        crypto = DeviceCryptoManager(prefs)
+        repository = NotifyRepository(this, prefs, db, api, notifications, crypto)
 
         if (prefs.isPaired) {
             SyncWorker.schedulePeriodic(this)

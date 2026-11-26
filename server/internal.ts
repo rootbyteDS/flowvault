@@ -15,9 +15,11 @@ import path from 'node:path';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { db, DATA_DIR } from './db.ts';
 import { safeEqual } from './crypto.ts';
-import { clientFor, getInstance } from './sync.ts';
+import { clientFor, getInstance, restoreVersion } from './sync.ts';
+import { diagnoseWorkflowFailure } from './diagnose.ts';
+import { canonicalRollbackPayload, encryptForDevice, verifyDeviceSignature } from '../shared/mobile-crypto.ts';
 import { HttpError, requestT } from '../shared/i18n/server.ts';
-import { packError } from '../shared/i18n/index.ts';
+import { packError, renderError } from '../shared/i18n/index.ts';
 
 export const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? 4100);
 export const HEALTH_URL = (process.env.HEALTH_URL ?? `http://127.0.0.1:${HEALTH_PORT}`).replace(/\/+$/, '');
@@ -49,14 +51,19 @@ const MCP_PATHS = [
   /^\/health\/.+$/,
 ];
 
-/** Was der Notify-Dienst aufrufen darf: nur Metadaten, offene Alerts und Alert-Dismiss. */
+/** Was der Notify-Dienst aufrufen darf: Metadaten, offene Alerts, E2E-Diagnose und kryptografisch signiertes Rollback. */
 const NOTIFY_READ_PATHS = [
   /^\/instances$/,
   /^\/workflows$/,
+  /^\/workflows\/\d+\/rollback-preview$/,
   /^\/activity$/,
   /^\/health\/alerts$/,
 ];
-const NOTIFY_WRITE_PATHS = [/^\/health\/alerts\/\d+\/dismiss$/];
+const NOTIFY_WRITE_PATHS = [
+  /^\/health\/alerts\/\d+\/dismiss$/,
+  /^\/actions\/diagnose$/,
+  /^\/actions\/rollback$/,
+];
 
 function requireToken(req: Request, res: Response, next: NextFunction) {
   const given = req.headers['x-internal-token'];
@@ -285,6 +292,100 @@ internalRouter.get('/workflows/:id/timeline', (req, res) => {
   if (!t) return void res.status(404).json({ error: requestT(req)('errors.workflow.notFound') });
   const inst = getInstance(t.instanceId);
   res.json({ ...t, instanceName: inst?.name ?? '' });
+});
+
+/** Vorschau-Metadaten für ein Rollback aus der Mobile-App (ohne Snapshot-Inhalte). */
+internalRouter.get('/workflows/:id/rollback-preview', (req, res) => {
+  const workflowId = id(req.params.id);
+  const targetVersionId = id(req.query.versionId);
+  const wf = db
+    .prepare(
+      `SELECT w.id, w.instance_id, w.name, w.deleted_at, w.version_count, i.name AS instance_name
+         FROM workflows w JOIN instances i ON i.id = w.instance_id WHERE w.id = ?`,
+    )
+    .get(workflowId) as
+    | { id: number; instance_id: number; name: string; deleted_at: number | null; version_count: number; instance_name: string }
+    | undefined;
+  if (!wf) return void res.status(404).json({ error: requestT(req)('errors.workflow.notFound') });
+  if (wf.deleted_at) return void res.status(409).json({ error: requestT(req)('errors.restore.workflowGone') });
+  const target = db
+    .prepare('SELECT id, number FROM versions WHERE id = ? AND workflow_id = ?')
+    .get(targetVersionId, workflowId) as { id: number; number: number } | undefined;
+  if (!target) return void res.status(404).json({ error: requestT(req)('errors.version.notFound') });
+  res.json({
+    instanceId: wf.instance_id,
+    instanceName: wf.instance_name,
+    workflowId: wf.id,
+    workflowName: wf.name,
+    currentVersionNumber: wf.version_count,
+    targetVersionId: target.id,
+    targetVersionNumber: target.number,
+  });
+});
+
+/**
+ * Führt eine Fehler-/Diff-/KI-Diagnose im Core aus.
+ * Wenn das Gerät einen öffentlichen ECDH-P-256-Schlüssel hinterlegt hat, wird das Ergebnis
+ * bereits im Core Ende-zu-Ende verschlüsselt, sodass `services/notify` keinen Klartext sieht.
+ */
+internalRouter.post('/actions/diagnose', async (req, res) => {
+  const b = req.body ?? {};
+  const workflowId = id(b.workflowId);
+  const out = await diagnoseWorkflowFailure({
+    workflowId,
+    versionId: b.versionId ? id(b.versionId) : null,
+    rollbackVersionId: b.rollbackVersionId ? id(b.rollbackVersionId) : null,
+    errorNode: typeof b.errorNode === 'string' ? b.errorNode : null,
+    errorMessage: typeof b.errorMessage === 'string' ? b.errorMessage : null,
+    language: typeof b.language === 'string' ? b.language : undefined,
+  });
+  if (!out) return void res.status(404).json({ error: requestT(req)('errors.workflow.notFound') });
+  const encKey = typeof b.encryptionPublicKey === 'string' && b.encryptionPublicKey ? b.encryptionPublicKey : null;
+  if (encKey) {
+    try {
+      const envelope = encryptForDevice(out.diagnosis, encKey);
+      return void res.json({ instanceId: out.instanceId, encrypted: true, envelope });
+    } catch {
+      return void res.status(400).json({ error: requestT(req)('errors.notify.invalidPublicKey') });
+    }
+  }
+  res.json({ instanceId: out.instanceId, encrypted: false, diagnosis: out.diagnosis });
+});
+
+/**
+ * Führt ein kryptografisch signiertes Rollback aus der Mobile-App durch.
+ * Defense-in-Depth: Der Core prüft die ECDSA-Hardware-Signatur des Geräts eigenständig gegen den
+ * kanonischen Challenge-Payload, bevor `restoreVersion` in n8n schreibt.
+ */
+internalRouter.post('/actions/rollback', async (req, res) => {
+  const b = req.body ?? {};
+  const challengeId = String(b.challengeId ?? '');
+  const nonce = String(b.nonce ?? '');
+  const deviceId = id(b.deviceId);
+  const workflowId = id(b.workflowId);
+  const targetVersionId = id(b.targetVersionId);
+  const signingPublicKey = String(b.signingPublicKey ?? '');
+  const signature = String(b.signature ?? '');
+
+  if (!challengeId || !nonce || !signingPublicKey || !signature) {
+    return void res.status(400).json({ error: requestT(req)('errors.notify.signatureInvalid') });
+  }
+  const canonical = canonicalRollbackPayload({ challengeId, nonce, deviceId, workflowId, targetVersionId });
+  if (!verifyDeviceSignature(signingPublicKey, canonical, signature)) {
+    return void res.status(403).json({ error: requestT(req)('errors.notify.signatureInvalid') });
+  }
+
+  const ver = db
+    .prepare('SELECT id, number, workflow_id FROM versions WHERE id = ? AND workflow_id = ?')
+    .get(targetVersionId, workflowId) as { id: number; number: number; workflow_id: number } | undefined;
+  if (!ver) return void res.status(404).json({ error: requestT(req)('errors.version.notFound') });
+
+  try {
+    await restoreVersion(targetVersionId, { mode: 'overwrite' });
+    res.json({ ok: true, workflowId, restoredFromNumber: ver.number });
+  } catch (e) {
+    res.status(502).json({ error: renderError(e, requestT(req)) });
+  }
 });
 
 internalRouter.use((req, res) => {

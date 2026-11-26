@@ -1,12 +1,13 @@
 /**
  * SQLite-Speicher des Notification-Dienstes (notify.db):
- * Einstellungen, QR-Pairing-Codes, gekoppelte Geräte, Nachrichten-Feed (mit Burst-Coalescing),
- * Filterregeln, Ruhezeiten und Lesestände.
+ * Einstellungen, QR-Pairing-Codes, gekoppelte Geräte (inkl. Hardware-Public-Keys & Rollback-Freigabe),
+ * Nachrichten-Feed (mit Burst-Coalescing), Einmal-Challenges für signierte Rollbacks, Filterregeln und Lesestände.
  */
 import crypto from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import QRCode from 'qrcode';
 import { HttpError } from '../../shared/i18n/server.ts';
+import { canonicalRollbackPayload, validateEcPublicKeySpki, verifyDeviceSignature } from '../../shared/mobile-crypto.ts';
 import { redactText } from '../../shared/redact.ts';
 import {
   categoryOfKind,
@@ -26,13 +27,15 @@ import {
   type PushType,
   type QuietHours,
   type RedactionMode,
+  type RollbackChallenge,
 } from '../../shared/notify.ts';
-import type { CoreInstanceMeta } from './core.ts';
+import type { CoreInstanceMeta, RollbackPreview } from './core.ts';
 
 export const TOKEN_PREFIX = 'fv_app_';
 const MAX_DEVICES = 50;
 const PAIR_TTL_MS = 5 * 60_000;
 const PAIR_MAX_ATTEMPTS = 5;
+const CHALLENGE_TTL_MS = 60_000;
 const TOUCH_EVERY_MS = 60_000;
 export const COALESCE_WINDOW_MS = 10 * 60_000;
 const PUSH_MILESTONES = new Set([1, 10, 50, 100, 500]);
@@ -59,6 +62,9 @@ interface DeviceRow {
   token_hint: string;
   allowed_instances: string | null;
   redaction_mode: RedactionMode;
+  allow_rollback: number;
+  signing_public_key: string | null;
+  encryption_public_key: string | null;
   push_type: PushType;
   push_endpoint: string | null;
   language: string;
@@ -69,6 +75,8 @@ interface DeviceRow {
 
 export interface DeviceRecord extends NotifyDevice {
   pushEndpoint: string | null;
+  signingPublicKey: string | null;
+  encryptionPublicKey: string | null;
 }
 
 interface PairingRow {
@@ -77,7 +85,21 @@ interface PairingRow {
   label: string;
   allowed_instances: string | null;
   redaction_mode: RedactionMode;
+  allow_rollback: number;
   attempts: number;
+  expires_at: number;
+  used_at: number | null;
+  created_at: number;
+}
+
+interface ChallengeRow {
+  id: string;
+  device_id: number;
+  action: string;
+  instance_id: number;
+  workflow_id: number;
+  target_version_id: number;
+  nonce: string;
   expires_at: number;
   used_at: number | null;
   created_at: number;
@@ -128,6 +150,17 @@ function parseRedaction(v: unknown, fallback: RedactionMode): RedactionMode {
   return v as RedactionMode;
 }
 
+function parseOptionalPublicKey(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null || v === '') return null;
+  if (typeof v !== 'string') throw new HttpError(400, 'errors.notify.invalidPublicKey');
+  try {
+    return validateEcPublicKeySpki(v);
+  } catch {
+    throw new HttpError(400, 'errors.notify.invalidPublicKey');
+  }
+}
+
 function parseQuietHours(v: unknown): QuietHours | null {
   if (v === null || v === undefined) return null;
   if (typeof v !== 'object') throw new HttpError(400, 'errors.notify.invalidQuietHours');
@@ -153,6 +186,11 @@ function toDeviceRecord(r: DeviceRow): DeviceRecord {
     hint: r.token_hint,
     instances: r.allowed_instances ? (JSON.parse(r.allowed_instances) as number[]) : null,
     redactionMode: VALID_REDACTION.has(r.redaction_mode) ? r.redaction_mode : 'lockscreen',
+    allowRollback: !!r.allow_rollback,
+    signingKeyConfigured: !!r.signing_public_key,
+    encryptionKeyConfigured: !!r.encryption_public_key,
+    signingPublicKey: r.signing_public_key,
+    encryptionPublicKey: r.encryption_public_key,
     pushType: VALID_PUSH_TYPE.has(r.push_type) ? r.push_type : 'none',
     pushConfigured: !!r.push_endpoint,
     pushEndpoint: r.push_endpoint,
@@ -164,7 +202,7 @@ function toDeviceRecord(r: DeviceRow): DeviceRecord {
 }
 
 export function publicDevice(d: DeviceRecord): NotifyDevice {
-  const { pushEndpoint: _omit, ...rest } = d;
+  const { pushEndpoint: _p, signingPublicKey: _s, encryptionPublicKey: _e, ...rest } = d;
   return rest;
 }
 
@@ -280,6 +318,7 @@ export function createStore(db: DatabaseSync) {
       label             TEXT NOT NULL,
       allowed_instances TEXT,
       redaction_mode    TEXT NOT NULL DEFAULT 'lockscreen',
+      allow_rollback    INTEGER NOT NULL DEFAULT 0,
       attempts          INTEGER NOT NULL DEFAULT 0,
       expires_at        INTEGER NOT NULL,
       used_at           INTEGER,
@@ -287,19 +326,35 @@ export function createStore(db: DatabaseSync) {
     );
 
     CREATE TABLE IF NOT EXISTS devices (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      name              TEXT NOT NULL,
-      platform          TEXT NOT NULL DEFAULT 'android',
-      token_hash        TEXT NOT NULL UNIQUE,
-      token_hint        TEXT NOT NULL,
-      allowed_instances TEXT,
-      redaction_mode    TEXT NOT NULL DEFAULT 'lockscreen',
-      push_type         TEXT NOT NULL DEFAULT 'none',
-      push_endpoint     TEXT,
-      language          TEXT NOT NULL DEFAULT 'de',
-      quiet_hours       TEXT,
-      created_at        INTEGER NOT NULL,
-      last_seen_at      INTEGER
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      name                  TEXT NOT NULL,
+      platform              TEXT NOT NULL DEFAULT 'android',
+      token_hash            TEXT NOT NULL UNIQUE,
+      token_hint            TEXT NOT NULL,
+      allowed_instances     TEXT,
+      redaction_mode        TEXT NOT NULL DEFAULT 'lockscreen',
+      allow_rollback        INTEGER NOT NULL DEFAULT 0,
+      signing_public_key    TEXT,
+      encryption_public_key TEXT,
+      push_type             TEXT NOT NULL DEFAULT 'none',
+      push_endpoint         TEXT,
+      language              TEXT NOT NULL DEFAULT 'de',
+      quiet_hours           TEXT,
+      created_at            INTEGER NOT NULL,
+      last_seen_at          INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS action_challenges (
+      id                TEXT PRIMARY KEY,
+      device_id         INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      action            TEXT NOT NULL,
+      instance_id       INTEGER NOT NULL,
+      workflow_id       INTEGER NOT NULL,
+      target_version_id INTEGER NOT NULL,
+      nonce             TEXT NOT NULL,
+      expires_at        INTEGER NOT NULL,
+      used_at           INTEGER,
+      created_at        INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -349,6 +404,16 @@ export function createStore(db: DatabaseSync) {
       PRIMARY KEY (device_id, instance_id)
     );
   `);
+
+  // Additive Migrationen für bestehende Installationen
+  function addColumn(table: string, column: string, def: string) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
+  }
+  addColumn('pairing_codes', 'allow_rollback', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('devices', 'allow_rollback', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('devices', 'signing_public_key', 'TEXT');
+  addColumn('devices', 'encryption_public_key', 'TEXT');
 
   const getSetting = (k: string) =>
     (db.prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string } | undefined)?.value;
@@ -413,8 +478,18 @@ export function createStore(db: DatabaseSync) {
       return row ? toDeviceRecord(row) : null;
     },
 
+    setDeviceRollback(id: number, allowRollback: boolean): DeviceRecord {
+      const dev = this.getDevice(id);
+      if (!dev) throw new HttpError(404, 'errors.notify.deviceNotFound');
+      db.prepare('UPDATE devices SET allow_rollback = ? WHERE id = ?').run(allowRollback ? 1 : 0, id);
+      if (!allowRollback) {
+        db.prepare('DELETE FROM action_challenges WHERE device_id = ?').run(id);
+      }
+      return this.getDevice(id)!;
+    },
+
     async createPairing(
-      input: { label?: unknown; instances?: unknown; redactionMode?: unknown; serverUrl?: unknown },
+      input: { label?: unknown; instances?: unknown; redactionMode?: unknown; allowRollback?: unknown; serverUrl?: unknown },
       fallbackOrigin: string,
       now = Date.now(),
     ): Promise<NotifyPairingCreated> {
@@ -423,18 +498,18 @@ export function createStore(db: DatabaseSync) {
       if (label.length > 60) throw new HttpError(400, 'errors.notify.nameTooLong');
       const instances = parseInstances(input.instances);
       const redactionMode = parseRedaction(input.redactionMode, this.defaultRedaction());
+      const allowRollback = !!input.allowRollback;
       const { n } = db.prepare('SELECT COUNT(*) AS n FROM devices').get() as { n: number };
       if (n >= MAX_DEVICES) throw new HttpError(400, 'errors.notify.tooManyDevices', { max: MAX_DEVICES });
 
-      // Abgelaufene Codes aufräumen
       db.prepare('DELETE FROM pairing_codes WHERE expires_at <= ? OR used_at IS NOT NULL').run(now - 60_000);
 
       const code = crypto.randomBytes(16).toString('base64url');
       const expiresAt = now + PAIR_TTL_MS;
       db.prepare(
-        `INSERT INTO pairing_codes (code_hash, label, allowed_instances, redaction_mode, expires_at, created_at)
-         VALUES (?,?,?,?,?,?)`,
-      ).run(sha256(code), label, instances ? JSON.stringify(instances) : null, redactionMode, expiresAt, now);
+        `INSERT INTO pairing_codes (code_hash, label, allowed_instances, redaction_mode, allow_rollback, expires_at, created_at)
+         VALUES (?,?,?,?,?,?,?)`,
+      ).run(sha256(code), label, instances ? JSON.stringify(instances) : null, redactionMode, allowRollback ? 1 : 0, expiresAt, now);
 
       let origin = fallbackOrigin;
       if (typeof input.serverUrl === 'string' && input.serverUrl.trim()) {
@@ -445,11 +520,18 @@ export function createStore(db: DatabaseSync) {
       }
       const uri = `flowvault://pair?v=1&url=${encodeURIComponent(origin)}&code=${encodeURIComponent(code)}`;
       const qrDataUrl = await QRCode.toDataURL(uri, { margin: 2, width: 260, color: { dark: '#151a23', light: '#ffffff' } });
-      return { code, uri, qrDataUrl, expiresAt, label, instances, redactionMode };
+      return { code, uri, qrDataUrl, expiresAt, label, instances, redactionMode, allowRollback };
     },
 
     redeemPairing(
-      input: { code?: unknown; deviceName?: unknown; platform?: unknown; language?: unknown },
+      input: {
+        code?: unknown;
+        deviceName?: unknown;
+        platform?: unknown;
+        language?: unknown;
+        signingPublicKey?: unknown;
+        encryptionPublicKey?: unknown;
+      },
       serverVersion: string,
       now = Date.now(),
     ): { response: NotifyPairedResponse; device: DeviceRecord } {
@@ -459,7 +541,6 @@ export function createStore(db: DatabaseSync) {
       const hash = sha256(code);
       const row = db.prepare('SELECT * FROM pairing_codes WHERE code_hash = ?').get(hash) as unknown as PairingRow | undefined;
       if (!row) {
-        // Fehlversuche auf aktiven Codes mitzählen, damit ein Brute-Force offene QR-Codes ungültig macht
         db.prepare('UPDATE pairing_codes SET attempts = attempts + 1 WHERE used_at IS NULL AND expires_at > ?').run(now);
         db.prepare('DELETE FROM pairing_codes WHERE used_at IS NULL AND attempts >= ?').run(PAIR_MAX_ATTEMPTS);
         throw new HttpError(401, 'errors.notify.pairingInvalid');
@@ -467,6 +548,9 @@ export function createStore(db: DatabaseSync) {
       if (row.used_at !== null || row.expires_at <= now || row.attempts >= PAIR_MAX_ATTEMPTS) {
         throw new HttpError(401, 'errors.notify.pairingExpired');
       }
+
+      const signingKey = parseOptionalPublicKey(input.signingPublicKey) ?? null;
+      const encryptionKey = parseOptionalPublicKey(input.encryptionPublicKey) ?? null;
 
       const { n } = db.prepare('SELECT COUNT(*) AS n FROM devices').get() as { n: number };
       if (n >= MAX_DEVICES) throw new HttpError(400, 'errors.notify.tooManyDevices', { max: MAX_DEVICES });
@@ -486,10 +570,15 @@ export function createStore(db: DatabaseSync) {
 
       const ins = db
         .prepare(
-          `INSERT INTO devices (name, platform, token_hash, token_hint, allowed_instances, redaction_mode, language, created_at, last_seen_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO devices (
+             name, platform, token_hash, token_hint, allowed_instances, redaction_mode, allow_rollback,
+             signing_public_key, encryption_public_key, language, created_at, last_seen_at
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         )
-        .run(name, platform, sha256(token), hint, row.allowed_instances, row.redaction_mode, language, now, now);
+        .run(
+          name, platform, sha256(token), hint, row.allowed_instances, row.redaction_mode, row.allow_rollback ? 1 : 0,
+          signingKey, encryptionKey, language, now, now,
+        );
 
       const device = this.getDevice(Number(ins.lastInsertRowid))!;
       return {
@@ -500,6 +589,7 @@ export function createStore(db: DatabaseSync) {
           serverName: 'FlowVault',
           serverVersion,
           redactionMode: device.redactionMode,
+          allowRollback: device.allowRollback,
           allowedInstances: device.instances,
         },
       };
@@ -524,7 +614,15 @@ export function createStore(db: DatabaseSync) {
 
     updateDevice(
       id: number,
-      patch: { name?: unknown; language?: unknown; pushType?: unknown; pushEndpoint?: string | null; quietHours?: unknown },
+      patch: {
+        name?: unknown;
+        language?: unknown;
+        pushType?: unknown;
+        pushEndpoint?: string | null;
+        quietHours?: unknown;
+        signingPublicKey?: unknown;
+        encryptionPublicKey?: unknown;
+      },
     ): DeviceRecord {
       const current = this.getDevice(id);
       if (!current) throw new HttpError(404, 'errors.notify.deviceNotFound');
@@ -544,15 +642,120 @@ export function createStore(db: DatabaseSync) {
       }
       const pushEndpoint = patch.pushEndpoint !== undefined ? patch.pushEndpoint : current.pushEndpoint;
       const quietHours = patch.quietHours !== undefined ? parseQuietHours(patch.quietHours) : current.quietHours;
+      const parsedSign = parseOptionalPublicKey(patch.signingPublicKey);
+      const parsedEnc = parseOptionalPublicKey(patch.encryptionPublicKey);
+      const signingKey = parsedSign !== undefined ? parsedSign : current.signingPublicKey;
+      const encryptionKey = parsedEnc !== undefined ? parsedEnc : current.encryptionPublicKey;
 
       db.prepare(
-        `UPDATE devices SET name = ?, language = ?, push_type = ?, push_endpoint = ?, quiet_hours = ? WHERE id = ?`,
-      ).run(name, language, pushType, pushType === 'unifiedpush' ? pushEndpoint : null, quietHours ? JSON.stringify(quietHours) : null, id);
+        `UPDATE devices
+            SET name = ?, language = ?, push_type = ?, push_endpoint = ?, quiet_hours = ?,
+                signing_public_key = ?, encryption_public_key = ?
+          WHERE id = ?`,
+      ).run(
+        name,
+        language,
+        pushType,
+        pushType === 'unifiedpush' ? pushEndpoint : null,
+        quietHours ? JSON.stringify(quietHours) : null,
+        signingKey,
+        encryptionKey,
+        id,
+      );
       return this.getDevice(id)!;
     },
 
+    getMessageForDevice(device: DeviceRecord, seq: number): NotifyMessage | null {
+      const row = db.prepare('SELECT * FROM messages WHERE seq = ?').get(seq) as unknown as MessageRow | undefined;
+      if (!row) return null;
+      if (!allowedFor(device, row.instance_id)) throw new HttpError(403, 'errors.notify.instanceForbidden');
+      return toMessage(row);
+    },
+
+    createRollbackChallenge(device: DeviceRecord, preview: RollbackPreview, now = Date.now()): RollbackChallenge {
+      if (!device.allowRollback) throw new HttpError(403, 'errors.notify.rollbackDisabled');
+      if (!device.signingPublicKey) throw new HttpError(400, 'errors.notify.signingKeyMissing');
+      if (!allowedFor(device, preview.instanceId)) throw new HttpError(403, 'errors.notify.instanceForbidden');
+
+      db.prepare('DELETE FROM action_challenges WHERE expires_at <= ? OR used_at IS NOT NULL').run(now - 60_000);
+      const challengeId = crypto.randomBytes(16).toString('base64url');
+      const nonce = crypto.randomBytes(32).toString('base64url');
+      const expiresAt = now + CHALLENGE_TTL_MS;
+
+      db.prepare(
+        `INSERT INTO action_challenges (id, device_id, action, instance_id, workflow_id, target_version_id, nonce, expires_at, created_at)
+         VALUES (?,?,'rollback',?,?,?,?,?,?)`,
+      ).run(challengeId, device.id, preview.instanceId, preview.workflowId, preview.targetVersionId, nonce, expiresAt, now);
+
+      return {
+        challengeId,
+        nonce,
+        expiresAt,
+        instanceId: preview.instanceId,
+        instanceName: preview.instanceName,
+        workflowId: preview.workflowId,
+        workflowName: preview.workflowName,
+        currentVersionNumber: preview.currentVersionNumber,
+        targetVersionId: preview.targetVersionId,
+        targetVersionNumber: preview.targetVersionNumber,
+      };
+    },
+
+    consumeRollbackChallenge(
+      device: DeviceRecord,
+      challengeId: string,
+      signature: string,
+      now = Date.now(),
+    ): {
+      challengeId: string;
+      nonce: string;
+      deviceId: number;
+      workflowId: number;
+      targetVersionId: number;
+      signingPublicKey: string;
+    } {
+      if (!device.allowRollback) throw new HttpError(403, 'errors.notify.rollbackDisabled');
+      if (!device.signingPublicKey) throw new HttpError(400, 'errors.notify.signingKeyMissing');
+
+      const row = db.prepare('SELECT * FROM action_challenges WHERE id = ?').get(challengeId) as unknown as ChallengeRow | undefined;
+      if (!row || row.device_id !== device.id || row.action !== 'rollback') {
+        throw new HttpError(401, 'errors.notify.challengeInvalid');
+      }
+      if (row.used_at !== null || row.expires_at <= now) {
+        throw new HttpError(401, 'errors.notify.challengeExpired');
+      }
+      if (!allowedFor(device, row.instance_id)) {
+        throw new HttpError(403, 'errors.notify.instanceForbidden');
+      }
+
+      // Einmalig verbrauchen (Replay-Schutz auch vor Signaturprüfung!)
+      const used = db
+        .prepare('UPDATE action_challenges SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?')
+        .run(now, row.id, now);
+      if (used.changes === 0) throw new HttpError(401, 'errors.notify.challengeExpired');
+
+      const canonical = canonicalRollbackPayload({
+        challengeId: row.id,
+        nonce: row.nonce,
+        deviceId: device.id,
+        workflowId: row.workflow_id,
+        targetVersionId: row.target_version_id,
+      });
+      if (!verifyDeviceSignature(device.signingPublicKey, canonical, signature)) {
+        throw new HttpError(403, 'errors.notify.signatureInvalid');
+      }
+
+      return {
+        challengeId: row.id,
+        nonce: row.nonce,
+        deviceId: device.id,
+        workflowId: row.workflow_id,
+        targetVersionId: row.target_version_id,
+        signingPublicKey: device.signingPublicKey,
+      };
+    },
+
     ingest(payload: NotifyIngestPayload, now = Date.now()): IngestResult | null {
-      // 1) Stilles KI-Update einer bestehenden Änderungs-Nachricht
       if (payload.type === 'ai_summary') {
         if (!payload.workflowId || !payload.versionId || !payload.aiSummary) return null;
         const row = db
@@ -584,13 +787,11 @@ export function createStore(db: DatabaseSync) {
       const body = String(payload.body ?? '').trim().slice(0, 1000);
       if (!title) throw new HttpError(400, 'errors.notify.titleMissing');
 
-      // 2) Idempotenz über eventUid
       if (payload.eventUid) {
         const existing = db.prepare('SELECT * FROM messages WHERE event_uid = ?').get(payload.eventUid) as unknown as MessageRow | undefined;
         if (existing) return { message: toMessage(existing), created: false, updated: false, shouldPush: false };
       }
 
-      // 3) Burst-Coalescing (z. B. execution_failed innerhalb 10 Min. oder laufender Health-Alert)
       if (payload.groupKey) {
         const cutoff = kind === 'alert_opened' || kind === 'alert_escalated' ? 0 : now - COALESCE_WINDOW_MS;
         const existing = db
@@ -618,7 +819,6 @@ export function createStore(db: DatabaseSync) {
         }
       }
 
-      // 4) Neue Nachricht anlegen
       const updatedSeq = nextUpdateSeq();
       const ins = db
         .prepare(
@@ -654,7 +854,6 @@ export function createStore(db: DatabaseSync) {
         setSetting('update_seq', String(seq));
       }
 
-      // 5) Bei alert_resolved frühere offene alert_opened-Nachrichten verknüpfen
       if (kind === 'alert_resolved' && payload.alertId) {
         db.prepare(
           `UPDATE messages SET resolved_by_seq = ?, updated_seq = ?, updated_at = ?
@@ -662,7 +861,6 @@ export function createStore(db: DatabaseSync) {
         ).run(seq, nextUpdateSeq(), now, payload.alertId);
       }
 
-      // 6) Aufbewahrung einhalten
       const keepSince = now - this.retentionDays() * 864e5;
       db.prepare('DELETE FROM messages WHERE created_at < ?').run(keepSince);
 
@@ -862,7 +1060,6 @@ export function createStore(db: DatabaseSync) {
         };
       });
 
-      // Sortiere wie ein Messenger: Kanäle mit letzter Nachricht zuerst (neueste oben), dann alphabetisch
       channels.sort((a, b) => (b.lastMessage?.updatedAt ?? 0) - (a.lastMessage?.updatedAt ?? 0) || a.name.localeCompare(b.name));
 
       const openAlertsTotal = [...alertCount.values()].reduce((s, n) => s + n, 0);

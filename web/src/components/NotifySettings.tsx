@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, Copy, QrCode, Send, Smartphone } from 'lucide-react';
+import { Bell, Copy, KeyRound, QrCode, RotateCcw, Send, Smartphone } from 'lucide-react';
 import { api, useApi, type Instance } from '../api.ts';
 import type { NotifyDevice, NotifyPairingCreated, NotifyState, RedactionMode } from '../../../shared/notify.ts';
 import { Button, Card, ErrorBox, Field, InfoTip, Modal, Status, Switch, inputCls, useToast } from './ui.tsx';
@@ -19,7 +19,7 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
-/** Mobile App & Benachrichtigungen: Ein/Aus, QR-Pairing, gekoppelte Geräte, Test-Nachricht und Widerruf. */
+/** Mobile App & Benachrichtigungen: Ein/Aus, QR-Pairing, Rollback-Berechtigung pro Gerät, Test-Nachricht und Widerruf. */
 export function NotifySettings() {
   const toast = useToast();
   const st = useApi<NotifyState>('/notify');
@@ -27,8 +27,9 @@ export function NotifySettings() {
   const [label, setLabel] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
   const [redaction, setRedaction] = useState<RedactionMode>('lockscreen');
+  const [allowRollback, setAllowRollback] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
-  const [busy, setBusy] = useState<'toggle' | 'pair' | `test:${number}` | `revoke:${number}`>();
+  const [busy, setBusy] = useState<'toggle' | 'pair' | `test:${number}` | `revoke:${number}` | `rb:${number}`>();
   const [pairing, setPairing] = useState<NotifyPairingCreated>();
   const instanceName = new Map((instances.data ?? []).map((i) => [i.id, i.name]));
 
@@ -53,14 +54,29 @@ export function NotifySettings() {
           label,
           instances: selected.length ? selected : null,
           redactionMode: redaction,
+          allowRollback,
           serverUrl: serverUrl.trim() || undefined,
         },
       });
       setPairing(r);
       setLabel('');
       setSelected([]);
+      setAllowRollback(false);
     } catch (err) {
       toast((err as Error).message, 'error');
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function toggleDeviceRollback(device: NotifyDevice, next: boolean) {
+    setBusy(`rb:${device.id}`);
+    try {
+      await api(`/notify/devices/${device.id}`, { method: 'PATCH', body: { allowRollback: next } });
+      toast(t(next ? 'settings.notify.rollbackEnabled' : 'settings.notify.rollbackDisabled', { name: device.name }));
+      st.reload();
+    } catch (e) {
+      toast((e as Error).message, 'error');
     } finally {
       setBusy(undefined);
     }
@@ -150,19 +166,34 @@ export function NotifySettings() {
             ) : (
               <div className="mt-2 divide-y divide-line rounded-lg bg-panel-3 text-sm">
                 {s.devices.map((dev) => (
-                  <div key={dev.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                  <div key={dev.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span className="font-medium">{dev.name}</span>
                         <span className="font-mono text-xs text-dim">{dev.hint}</span>
                         <span className="rounded bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted">{pushLabel(dev)}</span>
+                        {dev.encryptionKeyConfigured && (
+                          <span className="inline-flex items-center gap-1 rounded bg-add/15 px-1.5 py-0.5 text-[11px] text-add">
+                            <KeyRound className="size-3" />
+                            {t('settings.notify.e2eActive')}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-0.5 text-xs text-dim">
                         {scopeLabel(dev.instances)} · {t(`settings.notify.redaction.${dev.redactionMode}`)} ·{' '}
                         {dev.lastSeenAt ? t('settings.notify.lastSeen', { when: timeAgo(dev.lastSeenAt) }) : t('settings.notify.neverSeen')}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        icon={<RotateCcw className="size-3.5" />}
+                        loading={busy === `rb:${dev.id}`}
+                        onClick={() => toggleDeviceRollback(dev, !dev.allowRollback)}
+                        title={t('settings.notify.rollbackToggleHint')}
+                      >
+                        {t(dev.allowRollback ? 'settings.notify.rollbackAllowed' : 'settings.notify.rollbackAllow')}
+                      </Button>
                       <Button
                         size="sm"
                         icon={<Send className="size-3.5" />}
@@ -225,6 +256,14 @@ export function NotifySettings() {
                   onChange={(e) => setServerUrl(e.target.value)}
                 />
               </Field>
+            </div>
+            <div className="mt-4">
+              <Switch
+                checked={allowRollback}
+                onChange={setAllowRollback}
+                label={t('settings.notify.rollbackAllowLabel')}
+                hint={t('settings.notify.rollbackAllowHint')}
+              />
             </div>
             <div className="mt-4">
               <Button type="submit" variant="primary" icon={<QrCode className="size-4" />} loading={busy === 'pair'} disabled={!s.enabled}>

@@ -1,16 +1,24 @@
 package de.flown8tive.flowvault.notify.data
 
 import android.content.Context
+import de.flown8tive.flowvault.notify.crypto.DeviceCryptoManager
 import de.flown8tive.flowvault.notify.model.DeliveryMode
 import de.flown8tive.flowvault.notify.model.DeviceUpdateDto
+import de.flown8tive.flowvault.notify.model.DiagnosisDto
+import de.flown8tive.flowvault.notify.model.FlowVaultJson
 import de.flown8tive.flowvault.notify.model.MessageDto
 import de.flown8tive.flowvault.notify.model.QuietHoursDto
+import de.flown8tive.flowvault.notify.model.RollbackChallengeDto
+import de.flown8tive.flowvault.notify.model.RollbackExecuteResponseDto
 import de.flown8tive.flowvault.notify.model.RuleDto
 import de.flown8tive.flowvault.notify.notify.NotificationHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 
 enum class ConnectionState {
     OFFLINE,
@@ -25,11 +33,15 @@ class NotifyRepository(
     private val db: FlowVaultDatabase,
     val api: FlowVaultApi,
     private val notifications: NotificationHelper,
+    val crypto: DeviceCryptoManager,
 ) {
     private val dao = db.dao()
 
     private val _connectionState = MutableStateFlow(ConnectionState.OFFLINE)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    private val _allowRollback = MutableStateFlow(prefs.allowRollback)
+    val allowRollbackFlow: StateFlow<Boolean> = _allowRollback.asStateFlow()
 
     val channelsFlow: Flow<List<ChannelEntity>> = dao.observeChannels()
     val openAlertMessagesFlow: Flow<List<MessageEntity>> = dao.observeOpenAlertMessages()
@@ -43,25 +55,51 @@ class NotifyRepository(
 
     suspend fun pair(serverUrl: String, code: String, deviceName: String) {
         val cleanUrl = serverUrl.trim().trimEnd('/')
-        val res = api.pair(cleanUrl, code.trim(), deviceName.trim().ifEmpty { prefs.deviceName })
+        val keys = withContext(Dispatchers.IO) { crypto.ensureKeys() }
+        val res = api.pair(
+            serverUrl = cleanUrl,
+            code = code.trim(),
+            deviceName = deviceName.trim().ifEmpty { prefs.deviceName },
+            signingPublicKey = keys.signingPublicKeySpki,
+            encryptionPublicKey = keys.encryptionPublicKeySpki,
+        )
         prefs.serverUrl = cleanUrl
         prefs.deviceToken = res.token
         prefs.deviceId = res.deviceId
         prefs.deviceName = deviceName.trim().ifEmpty { prefs.deviceName }
         prefs.serverVersion = res.serverVersion
         prefs.redactionMode = res.redactionMode
+        prefs.allowRollback = res.allowRollback
+        _allowRollback.value = res.allowRollback
         syncFull(notifyNew = false)
     }
 
-    /** Vollständiger Abgleich (Bootstrap + neue Nachrichten seit `latestSeq`). */
+    /** Vollständiger Abgleich (Bootstrap + ggf. automatische Schlüssel-Registrierung + neue Nachrichten). */
     suspend fun syncFull(notifyNew: Boolean = true): List<MessageDto> {
         val url = prefs.serverUrl ?: return emptyList()
         val token = prefs.deviceToken ?: return emptyList()
         val boot = api.bootstrap(url, token)
         prefs.serverVersion = boot.serverVersion
         prefs.redactionMode = boot.device.redactionMode
+        prefs.allowRollback = boot.device.allowRollback
+        _allowRollback.value = boot.device.allowRollback
         boot.device.quietHours?.let { prefs.quietHours = it }
         prefs.lastSyncAt = System.currentTimeMillis()
+
+        // Falls dieses Gerät noch vor dem Update gekoppelt wurde: Hardware- & E2E-Public-Keys automatisch nachreichen
+        if (!boot.device.signingKeyConfigured || !boot.device.encryptionKeyConfigured) {
+            runCatching {
+                val keys = withContext(Dispatchers.IO) { crypto.ensureKeys() }
+                api.updateDevice(
+                    url,
+                    token,
+                    DeviceUpdateDto(
+                        signingPublicKey = keys.signingPublicKeySpki,
+                        encryptionPublicKey = keys.encryptionPublicKeySpki,
+                    ),
+                )
+            }
+        }
 
         val channelEntities = boot.channels.map { it.toEntity() }
         if (channelEntities.isNotEmpty()) {
@@ -80,7 +118,10 @@ class NotifyRepository(
 
         val newlyCreated = mutableListOf<MessageDto>()
         if (response.items.isNotEmpty()) {
-            val entities = response.items.map { it.toEntity() }
+            val entities = response.items.map { dto ->
+                val priorDiag = dao.getMessage(dto.seq)?.diagnosisJson
+                dto.toEntity().copy(diagnosisJson = priorDiag)
+            }
             dao.upsertMessages(entities)
             for (msg in response.items) {
                 if (msg.kind == "alert_resolved" && msg.alertId != null) {
@@ -108,16 +149,16 @@ class NotifyRepository(
         return newlyCreated
     }
 
-    /** Verarbeitet ein eingehendes SSE-Event in Echtzeit. */
+    /** Verarbeitet ein eingehendes SSE-Event in Echtzeit (erhält bereits entschlüsselte lokale Diagnosen). */
     suspend fun handleStreamMessage(msg: MessageDto, isNew: Boolean, activeInstanceId: Int? = null) {
-        dao.upsertMessages(listOf(msg.toEntity()))
+        val priorDiag = dao.getMessage(msg.seq)?.diagnosisJson
+        dao.upsertMessages(listOf(msg.toEntity().copy(diagnosisJson = priorDiag)))
         if (msg.kind == "alert_resolved" && msg.alertId != null) {
             dao.markAlertResolved(msg.alertId, msg.seq)
         }
         if (msg.updatedSeq > prefs.latestSeq) prefs.latestSeq = msg.updatedSeq
         prefs.lastSyncAt = System.currentTimeMillis()
 
-        // Kanal-Vorschau sofort aktualisieren
         val existing = dao.getChannel(msg.instance.id)
         val unreadInc = if (isNew && activeInstanceId != msg.instance.id) 1 else 0
         val updatedChannel = (existing ?: ChannelEntity(
@@ -155,8 +196,53 @@ class NotifyRepository(
         val token = prefs.deviceToken ?: return
         val res = api.fetchMessages(url, token, instanceId = instanceId, limit = 100)
         if (res.items.isNotEmpty()) {
-            dao.upsertMessages(res.items.map { it.toEntity() })
+            val entities = res.items.map { dto ->
+                val priorDiag = dao.getMessage(dto.seq)?.diagnosisJson
+                dto.toEntity().copy(diagnosisJson = priorDiag)
+            }
+            dao.upsertMessages(entities)
         }
+    }
+
+    /** Fordert eine Ende-zu-Ende-verschlüsselte Fehleranalyse an, entschlüsselt sie lokal und speichert sie in Room. */
+    suspend fun analyzeMessage(seq: Long): DiagnosisDto {
+        val url = prefs.serverUrl ?: error("Nicht verbunden")
+        val token = prefs.deviceToken ?: error("Nicht verbunden")
+        val res = api.analyzeMessage(url, token, seq)
+        val diag = when {
+            res.encrypted && res.envelope != null -> withContext(Dispatchers.Default) {
+                crypto.decryptDiagnosis(res.envelope)
+            }
+            res.diagnosis != null -> res.diagnosis
+            else -> error("Leere Diagnose-Antwort")
+        }
+        dao.saveDiagnosis(seq, FlowVaultJson.encodeToString(diag))
+        return diag
+    }
+
+    /** Schritt 1: 60s Einmal-Challenge für ein Rollback vom Server holen. */
+    suspend fun requestRollbackChallenge(workflowId: Int, targetVersionId: Int): RollbackChallengeDto {
+        val url = prefs.serverUrl ?: error("Nicht verbunden")
+        val token = prefs.deviceToken ?: error("Nicht verbunden")
+        return api.requestRollbackChallenge(url, token, workflowId, targetVersionId)
+    }
+
+    /** Schritt 2: Im Android-Keystore signierte Challenge absenden und Stand synchronisieren. */
+    suspend fun executeSignedRollback(challenge: RollbackChallengeDto): RollbackExecuteResponseDto {
+        val url = prefs.serverUrl ?: error("Nicht verbunden")
+        val token = prefs.deviceToken ?: error("Nicht verbunden")
+        val signature = withContext(Dispatchers.IO) {
+            crypto.signRollbackChallenge(
+                challengeId = challenge.challengeId,
+                nonce = challenge.nonce,
+                deviceId = prefs.deviceId,
+                workflowId = challenge.workflowId,
+                targetVersionId = challenge.targetVersionId,
+            )
+        }
+        val out = api.executeRollback(url, token, challenge.challengeId, signature)
+        syncFull(notifyNew = false)
+        return out
     }
 
     suspend fun markChannelRead(instanceId: Int, readSeq: Long? = null) {
@@ -227,9 +313,11 @@ class NotifyRepository(
         if (!url.isNullOrBlank() && !token.isNullOrBlank()) {
             runCatching { api.unpair(url, token) }
         }
+        crypto.clearHardwareKeys()
         dao.clearMessages()
         dao.clearChannels()
         prefs.clearAll()
+        _allowRollback.value = false
         _connectionState.value = ConnectionState.OFFLINE
     }
 
