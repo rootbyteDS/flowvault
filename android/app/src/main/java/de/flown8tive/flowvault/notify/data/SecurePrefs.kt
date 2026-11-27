@@ -61,7 +61,7 @@ class SecurePrefs(context: Context) {
         set(value) = prefs.edit().putString("e2e_private_key", value).apply()
 
     var deliveryMode: DeliveryMode
-        get() = DeliveryMode.fromWire(prefs.getString("delivery_mode", DeliveryMode.PERIODIC.wireValue))
+        get() = DeliveryMode.fromWire(prefs.getString("delivery_mode", DeliveryMode.REALTIME_SERVICE.wireValue))
         set(value) = prefs.edit().putString("delivery_mode", value.wireValue).apply()
 
     var unifiedPushDistributor: String?
@@ -83,6 +83,10 @@ class SecurePrefs(context: Context) {
     var lastSyncAt: Long
         get() = prefs.getLong("last_sync_at", 0L)
         set(value) = prefs.edit().putLong("last_sync_at", value).apply()
+
+    var lastHeartbeatAt: Long
+        get() = prefs.getLong("last_heartbeat_at", 0L)
+        set(value) = prefs.edit().putLong("last_heartbeat_at", value).apply()
 
     var quietHours: QuietHoursDto
         get() {

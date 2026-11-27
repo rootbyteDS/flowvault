@@ -9,14 +9,15 @@ export interface SseClient {
   res: Response;
 }
 
-export function createSseHub(heartbeatMs = 25_000) {
+export function createSseHub(heartbeatMs = 20_000) {
   const byDevice = new Map<number, Set<Response>>();
 
   const timer = setInterval(() => {
+    const ts = Date.now();
     for (const set of byDevice.values()) {
       for (const res of set) {
         try {
-          res.write('event: ping\ndata: {}\n\n');
+          res.write(`event: ping\ndata: {"ts":${ts}}\n\n`);
         } catch {
           set.delete(res);
         }

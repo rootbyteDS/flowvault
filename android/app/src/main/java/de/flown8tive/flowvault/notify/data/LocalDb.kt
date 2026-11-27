@@ -56,6 +56,7 @@ data class MessageEntity(
     val body: String,
     val groupCount: Int,
     val resolvedBySeq: Long?,
+    val unread: Boolean = false,
     val metadataJson: String,
     val diagnosisJson: String? = null,
     val createdAt: Long,
@@ -63,6 +64,7 @@ data class MessageEntity(
 ) {
     fun decodedDiagnosis(): DiagnosisDto? =
         diagnosisJson?.let { runCatching { FlowVaultJson.decodeFromString<DiagnosisDto>(it) }.getOrNull() }
+
     fun toDto(): MessageDto = MessageDto(
         seq = seq,
         updatedSeq = updatedSeq,
@@ -76,13 +78,14 @@ data class MessageEntity(
         body = body,
         groupCount = groupCount,
         resolvedBySeq = resolvedBySeq,
+        unread = unread,
         metadata = runCatching { FlowVaultJson.decodeFromString<MessageMetadataDto>(metadataJson) }.getOrDefault(MessageMetadataDto()),
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
 }
 
-fun MessageDto.toEntity(): MessageEntity = MessageEntity(
+fun MessageDto.toEntity(defaultUnread: Boolean = false): MessageEntity = MessageEntity(
     seq = seq,
     updatedSeq = updatedSeq,
     instanceId = instance.id,
@@ -99,6 +102,7 @@ fun MessageDto.toEntity(): MessageEntity = MessageEntity(
     body = body,
     groupCount = groupCount,
     resolvedBySeq = resolvedBySeq,
+    unread = unread ?: defaultUnread,
     metadataJson = FlowVaultJson.encodeToString(metadata),
     createdAt = createdAt,
     updatedAt = updatedAt,
@@ -122,7 +126,7 @@ fun ChannelDto.toEntity(): ChannelEntity = ChannelEntity(
 
 @Dao
 interface NotifyDao {
-    @Query("SELECT * FROM channels ORDER BY COALESCE(lastMessageAt, 0) DESC, name ASC")
+    @Query("SELECT * FROM channels ORDER BY CASE WHEN unreadCount > 0 THEN 0 ELSE 1 END, COALESCE(lastMessageAt, 0) DESC, name ASC")
     fun observeChannels(): Flow<List<ChannelEntity>>
 
     @Query("SELECT * FROM channels WHERE instanceId = :instanceId LIMIT 1")
@@ -138,7 +142,22 @@ interface NotifyDao {
     suspend fun clearChannels()
 
     @Query("UPDATE channels SET unreadCount = 0, readSeq = MAX(readSeq, :readSeq) WHERE instanceId = :instanceId")
-    suspend fun markChannelRead(instanceId: Int, readSeq: Long)
+    suspend fun markChannelReadRow(instanceId: Int, readSeq: Long)
+
+    @Query("UPDATE messages SET unread = 0 WHERE instanceId = :instanceId AND seq <= :readSeq")
+    suspend fun markMessagesReadUpTo(instanceId: Int, readSeq: Long)
+
+    @Query("UPDATE messages SET unread = :unread WHERE seq = :seq")
+    suspend fun setMessageUnreadFlag(seq: Long, unread: Boolean)
+
+    @Query("SELECT seq FROM messages WHERE instanceId = :instanceId ORDER BY seq DESC LIMIT 1")
+    suspend fun latestSeqInChannel(instanceId: Int): Long?
+
+    @Query("SELECT COUNT(*) FROM messages WHERE instanceId = :instanceId AND unread = 1")
+    suspend fun countUnreadInChannel(instanceId: Int): Int
+
+    @Query("UPDATE channels SET unreadCount = :count WHERE instanceId = :instanceId")
+    suspend fun setChannelUnreadCount(instanceId: Int, count: Int)
 
     @Query("UPDATE channels SET mutedUntil = :mutedUntil WHERE instanceId = :instanceId")
     suspend fun updateChannelMute(instanceId: Int, mutedUntil: Long?)
@@ -148,6 +167,9 @@ interface NotifyDao {
 
     @Query("SELECT * FROM messages WHERE kind IN ('alert_opened', 'alert_escalated') AND resolvedBySeq IS NULL ORDER BY updatedAt DESC")
     fun observeOpenAlertMessages(): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE unread = 1 ORDER BY seq DESC")
+    fun observeAllUnreadMessages(): Flow<List<MessageEntity>>
 
     @Query("SELECT * FROM messages WHERE title LIKE :q OR body LIKE :q OR workflowName LIKE :q ORDER BY seq DESC LIMIT 100")
     fun searchMessages(q: String): Flow<List<MessageEntity>>
@@ -171,7 +193,7 @@ interface NotifyDao {
     suspend fun clearMessages()
 }
 
-@Database(entities = [ChannelEntity::class, MessageEntity::class], version = 2, exportSchema = false)
+@Database(entities = [ChannelEntity::class, MessageEntity::class], version = 3, exportSchema = false)
 abstract class FlowVaultDatabase : RoomDatabase() {
     abstract fun dao(): NotifyDao
 

@@ -12,6 +12,7 @@ import de.flown8tive.flowvault.notify.model.RollbackChallengeDto
 import de.flown8tive.flowvault.notify.model.RollbackExecuteResponseDto
 import de.flown8tive.flowvault.notify.model.RuleDto
 import de.flown8tive.flowvault.notify.notify.NotificationHelper
+import de.flown8tive.flowvault.notify.service.RealtimeSyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,17 +41,30 @@ class NotifyRepository(
     private val _connectionState = MutableStateFlow(ConnectionState.OFFLINE)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    private val _lastHeartbeatAt = MutableStateFlow(prefs.lastHeartbeatAt)
+    val lastHeartbeatFlow: StateFlow<Long> = _lastHeartbeatAt.asStateFlow()
+
     private val _allowRollback = MutableStateFlow(prefs.allowRollback)
     val allowRollbackFlow: StateFlow<Boolean> = _allowRollback.asStateFlow()
 
+    @Volatile
+    var activeInstanceId: Int? = null
+
     val channelsFlow: Flow<List<ChannelEntity>> = dao.observeChannels()
     val openAlertMessagesFlow: Flow<List<MessageEntity>> = dao.observeOpenAlertMessages()
+    val unreadMessagesFlow: Flow<List<MessageEntity>> = dao.observeAllUnreadMessages()
 
     fun messagesForInstance(instanceId: Int): Flow<List<MessageEntity>> = dao.observeMessagesForInstance(instanceId)
     fun searchMessages(query: String): Flow<List<MessageEntity>> = dao.searchMessages("%$query%")
 
     fun setConnectionState(state: ConnectionState) {
         _connectionState.value = state
+    }
+
+    fun recordHeartbeat() {
+        val now = System.currentTimeMillis()
+        prefs.lastHeartbeatAt = now
+        _lastHeartbeatAt.value = now
     }
 
     suspend fun pair(serverUrl: String, code: String, deviceName: String) {
@@ -71,10 +85,14 @@ class NotifyRepository(
         prefs.redactionMode = res.redactionMode
         prefs.allowRollback = res.allowRollback
         _allowRollback.value = res.allowRollback
+        // Standardmäßig sofort den zuverlässigen Echtzeit-Dienst aktivieren
+        prefs.deliveryMode = DeliveryMode.REALTIME_SERVICE
+        runCatching { api.updateDevice(cleanUrl, res.token, DeviceUpdateDto(pushType = DeliveryMode.REALTIME_SERVICE.wireValue)) }
         syncFull(notifyNew = false)
+        RealtimeSyncService.start(context)
     }
 
-    /** Vollständiger Abgleich (Bootstrap + ggf. automatische Schlüssel-Registrierung + neue Nachrichten). */
+    /** Vollständiger Abgleich (Bootstrap + Schlüssel-Sync + neue Nachrichten). */
     suspend fun syncFull(notifyNew: Boolean = true): List<MessageDto> {
         val url = prefs.serverUrl ?: return emptyList()
         val token = prefs.deviceToken ?: return emptyList()
@@ -86,7 +104,6 @@ class NotifyRepository(
         boot.device.quietHours?.let { prefs.quietHours = it }
         prefs.lastSyncAt = System.currentTimeMillis()
 
-        // Falls dieses Gerät noch vor dem Update gekoppelt wurde: Hardware- & E2E-Public-Keys automatisch nachreichen
         if (!boot.device.signingKeyConfigured || !boot.device.encryptionKeyConfigured) {
             runCatching {
                 val keys = withContext(Dispatchers.IO) { crypto.ensureKeys() }
@@ -119,8 +136,9 @@ class NotifyRepository(
         val newlyCreated = mutableListOf<MessageDto>()
         if (response.items.isNotEmpty()) {
             val entities = response.items.map { dto ->
-                val priorDiag = dao.getMessage(dto.seq)?.diagnosisJson
-                dto.toEntity().copy(diagnosisJson = priorDiag)
+                val prior = dao.getMessage(dto.seq)
+                dto.toEntity(defaultUnread = dto.unread ?: (lastKnown > 0L && dto.seq > lastKnown))
+                    .copy(diagnosisJson = prior?.diagnosisJson)
             }
             dao.upsertMessages(entities)
             for (msg in response.items) {
@@ -138,7 +156,7 @@ class NotifyRepository(
         if (notifyNew && newlyCreated.isNotEmpty()) {
             for (msg in newlyCreated) {
                 val ch = dao.getChannel(msg.instance.id)
-                if (!isMuted(ch?.mutedUntil)) {
+                if (activeInstanceId != msg.instance.id && !isMuted(ch?.mutedUntil)) {
                     notifications.showMessage(msg, dao.recentForInstance(msg.instance.id).map { it.toDto() })
                 }
             }
@@ -149,18 +167,21 @@ class NotifyRepository(
         return newlyCreated
     }
 
-    /** Verarbeitet ein eingehendes SSE-Event in Echtzeit (erhält bereits entschlüsselte lokale Diagnosen). */
-    suspend fun handleStreamMessage(msg: MessageDto, isNew: Boolean, activeInstanceId: Int? = null) {
-        val priorDiag = dao.getMessage(msg.seq)?.diagnosisJson
-        dao.upsertMessages(listOf(msg.toEntity().copy(diagnosisJson = priorDiag)))
+    /** Verarbeitet ein eingehendes SSE-Event in Echtzeit. */
+    suspend fun handleStreamMessage(msg: MessageDto, isNew: Boolean, overrideActiveInstance: Int? = null) {
+        val currentOpen = overrideActiveInstance ?: activeInstanceId
+        val prior = dao.getMessage(msg.seq)
+        val shouldMarkUnread = if (isNew) currentOpen != msg.instance.id else (prior?.unread ?: false)
+        dao.upsertMessages(listOf(msg.toEntity(defaultUnread = shouldMarkUnread).copy(unread = shouldMarkUnread, diagnosisJson = prior?.diagnosisJson)))
         if (msg.kind == "alert_resolved" && msg.alertId != null) {
             dao.markAlertResolved(msg.alertId, msg.seq)
         }
         if (msg.updatedSeq > prefs.latestSeq) prefs.latestSeq = msg.updatedSeq
         prefs.lastSyncAt = System.currentTimeMillis()
+        recordHeartbeat()
 
         val existing = dao.getChannel(msg.instance.id)
-        val unreadInc = if (isNew && activeInstanceId != msg.instance.id) 1 else 0
+        val unreadInc = if (isNew && shouldMarkUnread) 1 else 0
         val updatedChannel = (existing ?: ChannelEntity(
             instanceId = msg.instance.id,
             name = msg.instance.name,
@@ -186,7 +207,8 @@ class NotifyRepository(
         )
         dao.upsertChannels(listOf(updatedChannel))
 
-        if (isNew && activeInstanceId != msg.instance.id && !isMuted(existing?.mutedUntil)) {
+        // System-Benachrichtigung bei neuen Meldungen außerhalb des aktuell geöffneten Chats – und immer bei Selbsttests!
+        if ((isNew && currentOpen != msg.instance.id && !isMuted(existing?.mutedUntil)) || msg.kind == "test") {
             notifications.showMessage(msg, dao.recentForInstance(msg.instance.id).map { it.toDto() })
         }
     }
@@ -197,14 +219,14 @@ class NotifyRepository(
         val res = api.fetchMessages(url, token, instanceId = instanceId, limit = 100)
         if (res.items.isNotEmpty()) {
             val entities = res.items.map { dto ->
-                val priorDiag = dao.getMessage(dto.seq)?.diagnosisJson
-                dto.toEntity().copy(diagnosisJson = priorDiag)
+                val prior = dao.getMessage(dto.seq)
+                dto.toEntity(defaultUnread = dto.unread ?: prior?.unread ?: false)
+                    .copy(diagnosisJson = prior?.diagnosisJson)
             }
             dao.upsertMessages(entities)
         }
     }
 
-    /** Fordert eine Ende-zu-Ende-verschlüsselte Fehleranalyse an, entschlüsselt sie lokal und speichert sie in Room. */
     suspend fun analyzeMessage(seq: Long): DiagnosisDto {
         val url = prefs.serverUrl ?: error("Nicht verbunden")
         val token = prefs.deviceToken ?: error("Nicht verbunden")
@@ -220,14 +242,12 @@ class NotifyRepository(
         return diag
     }
 
-    /** Schritt 1: 60s Einmal-Challenge für ein Rollback vom Server holen. */
     suspend fun requestRollbackChallenge(workflowId: Int, targetVersionId: Int): RollbackChallengeDto {
         val url = prefs.serverUrl ?: error("Nicht verbunden")
         val token = prefs.deviceToken ?: error("Nicht verbunden")
         return api.requestRollbackChallenge(url, token, workflowId, targetVersionId)
     }
 
-    /** Schritt 2: Im Android-Keystore signierte Challenge absenden und Stand synchronisieren. */
     suspend fun executeSignedRollback(challenge: RollbackChallengeDto): RollbackExecuteResponseDto {
         val url = prefs.serverUrl ?: error("Nicht verbunden")
         val token = prefs.deviceToken ?: error("Nicht verbunden")
@@ -245,13 +265,47 @@ class NotifyRepository(
         return out
     }
 
+    /** Ganzen Kanal als gelesen markieren. */
     suspend fun markChannelRead(instanceId: Int, readSeq: Long? = null) {
-        val seq = readSeq ?: prefs.latestSeq
-        dao.markChannelRead(instanceId, seq)
+        val seq = readSeq ?: maxOf(prefs.latestSeq, dao.latestSeqInChannel(instanceId) ?: 0L)
+        dao.markMessagesReadUpTo(instanceId, seq)
+        dao.markChannelReadRow(instanceId, seq)
         notifications.cancelInstanceNotifications(instanceId)
         val url = prefs.serverUrl ?: return
         val token = prefs.deviceToken ?: return
         runCatching { api.markRead(url, token, instanceId, seq) }
+    }
+
+    /** Ganzen Kanal gezielt wieder als ungelesen markieren (z. B. zur späteren Bearbeitung). */
+    suspend fun markChannelUnread(instanceId: Int) {
+        val latest = dao.latestSeqInChannel(instanceId)
+        if (latest != null) {
+            dao.setMessageUnreadFlag(latest, true)
+            val count = dao.countUnreadInChannel(instanceId).coerceAtLeast(1)
+            dao.setChannelUnreadCount(instanceId, count)
+        } else {
+            dao.setChannelUnreadCount(instanceId, 1)
+        }
+        val url = prefs.serverUrl ?: return
+        val token = prefs.deviceToken ?: return
+        runCatching { api.markChannelUnread(url, token, instanceId) }
+    }
+
+    /** Einzelne Nachricht als gelesen oder ungelesen markieren. */
+    suspend fun setMessageUnread(seq: Long, instanceId: Int, unread: Boolean) {
+        dao.setMessageUnreadFlag(seq, unread)
+        val count = dao.countUnreadInChannel(instanceId)
+        dao.setChannelUnreadCount(instanceId, count)
+        if (!unread && count == 0) notifications.cancelInstanceNotifications(instanceId)
+        val url = prefs.serverUrl ?: return
+        val token = prefs.deviceToken ?: return
+        runCatching { api.setMessageUnread(url, token, seq, unread) }
+    }
+
+    suspend fun sendSelfTest() {
+        val url = prefs.serverUrl ?: error("Nicht verbunden")
+        val token = prefs.deviceToken ?: error("Nicht verbunden")
+        api.triggerSelfTest(url, token)
     }
 
     suspend fun muteInstance(instanceId: Int, durationMs: Long?) {

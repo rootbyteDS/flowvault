@@ -45,7 +45,9 @@ class FlowVaultApi {
 
     private val sseClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS) // Offener Event-Stream
+        // Server sendet alle 20 s ein `ping`-Event -> nach 45 s Funkstille gilt die Leitung als tot und baut neu auf!
+        .readTimeout(45, TimeUnit.SECONDS)
+        .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .followRedirects(false)
         .build()
@@ -120,8 +122,23 @@ class FlowVaultApi {
     }
 
     suspend fun markRead(serverUrl: String, token: String, instanceId: Int, readSeq: Long) {
-        val body = FlowVaultJson.encodeToString(ReadRequestDto(instanceId, readSeq)).toRequestBody(jsonMediaType)
+        val body = FlowVaultJson.encodeToString(ReadRequestDto(instanceId = instanceId, readSeq = readSeq)).toRequestBody(jsonMediaType)
         execute<Unit>(authRequest(serverUrl, token, "/read").post(body).build())
+    }
+
+    suspend fun markChannelUnread(serverUrl: String, token: String, instanceId: Int) {
+        val body = FlowVaultJson.encodeToString(ReadRequestDto(instanceId = instanceId, unread = true)).toRequestBody(jsonMediaType)
+        execute<Unit>(authRequest(serverUrl, token, "/read").post(body).build())
+    }
+
+    suspend fun setMessageUnread(serverUrl: String, token: String, seq: Long, unread: Boolean) {
+        val body = FlowVaultJson.encodeToString(ReadRequestDto(seq = seq, unread = unread)).toRequestBody(jsonMediaType)
+        execute<Unit>(authRequest(serverUrl, token, "/read").post(body).build())
+    }
+
+    suspend fun triggerSelfTest(serverUrl: String, token: String) {
+        val body = "{}".toRequestBody(jsonMediaType)
+        execute<Unit>(authRequest(serverUrl, token, "/test").post(body).build())
     }
 
     suspend fun updateDevice(serverUrl: String, token: String, patch: DeviceUpdateDto): DeviceDto {
@@ -173,6 +190,7 @@ class FlowVaultApi {
         token: String,
         afterSeq: Long,
         onConnected: () -> Unit,
+        onHeartbeat: () -> Unit = {},
         onMessage: (MessageDto, Boolean) -> Unit,
         onFailure: (Throwable?) -> Unit,
     ): EventSource {
@@ -180,22 +198,25 @@ class FlowVaultApi {
             .url(buildUrl(serverUrl, "/stream", mapOf("after" to afterSeq.toString())))
             .header("Authorization", "Bearer $token")
             .header("Accept", "text/event-stream")
+            .header("Cache-Control", "no-cache")
             .header("Last-Event-ID", afterSeq.toString())
             .get()
             .build()
 
         val listener = object : EventSourceListener() {
             override fun onOpen(eventSource: EventSource, response: Response) {
+                onHeartbeat()
                 onConnected()
             }
 
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                onHeartbeat()
                 when (type) {
                     "message", "message_updated" -> {
                         val dto = runCatching { FlowVaultJson.decodeFromString<MessageDto>(data) }.getOrNull() ?: return
                         onMessage(dto, type == "message")
                     }
-                    "ready" -> onConnected()
+                    "ready", "ping" -> onConnected()
                 }
             }
 

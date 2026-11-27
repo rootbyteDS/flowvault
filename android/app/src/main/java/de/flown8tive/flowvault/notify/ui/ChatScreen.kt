@@ -5,9 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,16 +28,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MarkEmailRead
+import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.AlertDialog
@@ -45,6 +55,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -74,6 +85,7 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import de.flown8tive.flowvault.notify.data.MessageEntity
 import de.flown8tive.flowvault.notify.model.DiagnosisDto
+import de.flown8tive.flowvault.notify.model.GoldenCircleCopy
 import de.flown8tive.flowvault.notify.model.MessageCategoryHelper
 import de.flown8tive.flowvault.notify.model.MessageDto
 import de.flown8tive.flowvault.notify.ui.theme.FvColors
@@ -83,12 +95,14 @@ import java.util.Locale
 
 private enum class ChatFilter(val label: String) {
     ALL("Alle"),
-    FAILS("Fails"),
+    UNREAD("Ungelesen"),
+    FAILS("Störungen"),
     CHANGES("Änderungen"),
 }
 
 private data class UiChatMessage(
     val dto: MessageDto,
+    val unread: Boolean,
     val diagnosis: DiagnosisDto?,
 )
 
@@ -120,18 +134,21 @@ fun ChatScreen(
         onDispose { vm.setActiveInstance(null) }
     }
 
+    val unreadCountInChat = remember(rawMessages) { rawMessages.count { it.unread } }
+
     val messages = remember(rawMessages, filter) {
-        rawMessages.map { UiChatMessage(it.toDto(), it.decodedDiagnosis()) }.filter { m ->
+        rawMessages.map { UiChatMessage(it.toDto(), it.unread, it.decodedDiagnosis()) }.filter { m ->
             when (filter) {
                 ChatFilter.ALL -> true
+                ChatFilter.UNREAD -> m.unread
                 ChatFilter.FAILS -> MessageCategoryHelper.isFail(m.dto.kind) || MessageCategoryHelper.isRecovery(m.dto.kind)
                 ChatFilter.CHANGES -> MessageCategoryHelper.isChange(m.dto.kind)
             }
         }
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && instanceId != null) {
+    LaunchedEffect(rawMessages.size) {
+        if (messages.isNotEmpty() && instanceId != null && filter == ChatFilter.ALL) {
             listState.scrollToItem(messages.lastIndex)
         }
     }
@@ -149,10 +166,20 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text(title, fontWeight = FontWeight.SemiBold, color = FvColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${messages.size} Meldungen", style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
+                        val sub = if (unreadCountInChat > 0) {
+                            "$unreadCountInChat ungelesen · ${rawMessages.size} gesamt"
+                        } else {
+                            "Alle gelesen · ${rawMessages.size} Meldungen"
+                        }
+                        Text(sub, style = MaterialTheme.typography.labelSmall, color = if (unreadCountInChat > 0) FvColors.AccentHi else FvColors.Muted)
                     }
                 },
                 actions = {
+                    if (instanceId != null && unreadCountInChat > 0) {
+                        IconButton(onClick = { vm.markChannelRead(instanceId) }) {
+                            Icon(Icons.Default.DoneAll, contentDescription = "Alle als gelesen markieren", tint = FvColors.Add)
+                        }
+                    }
                     if (instanceId != null) {
                         IconButton(onClick = { vm.muteInstance(instanceId, 3_600_000L) }) {
                             Icon(Icons.Default.NotificationsOff, contentDescription = "1h stumm", tint = FvColors.Muted)
@@ -164,15 +191,20 @@ fun ChatScreen(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (instanceId != null) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ChatFilter.entries.forEach { item ->
+                    items(ChatFilter.entries) { item ->
+                        val label = if (item == ChatFilter.UNREAD && unreadCountInChat > 0) {
+                            "Ungelesen ($unreadCountInChat)"
+                        } else {
+                            item.label
+                        }
                         FilterChip(
                             selected = filter == item,
                             onClick = { filter = item },
-                            label = { Text(item.label) },
+                            label = { Text(label) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = FvColors.AccentStrong,
                                 selectedLabelColor = FvColors.Text,
@@ -184,28 +216,33 @@ fun ChatScreen(
 
             if (messages.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Noch keine Nachrichten in diesem Kanal.", color = FvColors.Dim)
+                    Text(
+                        if (filter == ChatFilter.UNREAD) "Keine ungelesenen Meldungen in diesem Kanal." else "Noch keine Nachrichten in diesem Kanal.",
+                        color = FvColors.Dim,
+                    )
                 }
             } else {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(messages, key = { it.dto.seq }) { item ->
                         val msg = item.dto
                         val rollbackVerId = msg.metadata.rollback?.versionId ?: item.diagnosis?.rollbackVersionId
                         val rollbackVerNum = msg.metadata.rollback?.number ?: item.diagnosis?.rollbackVersionNumber
-                        MessengerCard(
+                        GoldenCircleMessengerCard(
                             msg = msg,
+                            unread = item.unread,
                             diagnosis = item.diagnosis,
                             isAnalyzing = analyzingSeqs.contains(msg.seq),
                             allowRollback = allowRollback,
                             rollbackBusy = rollbackBusy,
                             rollbackVersionNumber = rollbackVerNum,
                             showInstance = instanceId == null,
-                            onClick = { selectedDetail = item },
+                            onOpenSheet = { selectedDetail = item },
+                            onToggleUnread = { vm.setMessageUnread(msg.seq, msg.instance.id, !item.unread) },
                             onAnalyze = { vm.analyzeMessage(msg.seq) },
                             onRollback = {
                                 val wfId = msg.workflow?.id
@@ -239,12 +276,12 @@ fun ChatScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Instanz: ${ch.instanceName}\nWorkflow: ${ch.workflowName}\nAktuell: v${ch.currentVersionNumber} → Ziel: v${ch.targetVersionNumber}",
+                        "Warum: Stellt den letzten stabilen Stand wieder her.\n\nInstanz: ${ch.instanceName}\nWorkflow: ${ch.workflowName}\nWechsel: v${ch.currentVersionNumber} → v${ch.targetVersionNumber}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = FvColors.Text,
                     )
                     Text(
-                        "Der Auftrag wird mit dem Hardware-Schlüssel dieses Geräts (Android Keystore) signiert und überschreibt den Workflow in n8n als neue Version. Es werden die heutigen Zugangsdaten der referenzierten Credentials genutzt.",
+                        "Wie: Deine Biometrie schaltet den Hardware-Schlüssel im Android Keystore frei und signiert diese 60s-Einmal-Freigabe.",
                         style = MaterialTheme.typography.bodySmall,
                         color = FvColors.Muted,
                     )
@@ -286,8 +323,9 @@ fun ChatScreen(
 
     selectedDetail?.let { item ->
         val msg = item.dto
-        // Halte Diagnose auch im geöffneten Bottom-Sheet live aktuell
-        val liveDiag = messages.firstOrNull { it.dto.seq == msg.seq }?.diagnosis ?: item.diagnosis
+        val liveItem = messages.firstOrNull { it.dto.seq == msg.seq } ?: item
+        val liveDiag = liveItem.diagnosis
+        val isUnread = liveItem.unread
         val rollbackVerId = msg.metadata.rollback?.versionId ?: liveDiag?.rollbackVersionId
         val rollbackVerNum = msg.metadata.rollback?.number ?: liveDiag?.rollbackVersionNumber
 
@@ -305,6 +343,9 @@ fun ChatScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = FvColors.Dim,
                 )
+                liveDiag?.let { DiagnosisBox(it) }
+
+                Text("Technische Rohdaten (WHAT)", style = MaterialTheme.typography.labelMedium, color = FvColors.Muted)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -330,9 +371,19 @@ fun ChatScreen(
                         )
                     }
                 }
-                liveDiag?.let { DiagnosisBox(it) }
 
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AssistChip(
+                        onClick = { vm.setMessageUnread(msg.seq, msg.instance.id, !isUnread) },
+                        label = { Text(if (isUnread) "Als gelesen markieren" else "Als ungelesen markieren") },
+                        leadingIcon = {
+                            Icon(
+                                if (isUnread) Icons.Default.MarkEmailRead else Icons.Default.MarkEmailUnread,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                    )
                     if (MessageCategoryHelper.isFail(msg.kind) && msg.workflow != null) {
                         AssistChip(
                             onClick = { vm.analyzeMessage(msg.seq) },
@@ -372,23 +423,34 @@ fun ChatScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Nachrichten-Karte nach dem Golden-Circle-Prinzip:
+ * 1. WHY (Bedeutung & Auswirkung sofort erfassbar)
+ * 2. HOW (Empfohlene Reaktion, E2E-Diagnose & direkte Buttons inkl. Gelesen/Ungelesen)
+ * 3. WHAT (Technische Rohdaten, Nodes & Nebenaktionen aufklappbar)
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
-private fun MessengerCard(
+private fun GoldenCircleMessengerCard(
     msg: MessageDto,
+    unread: Boolean,
     diagnosis: DiagnosisDto?,
     isAnalyzing: Boolean,
     allowRollback: Boolean,
     rollbackBusy: Boolean,
     rollbackVersionNumber: Int?,
     showInstance: Boolean,
-    onClick: () -> Unit,
+    onOpenSheet: () -> Unit,
+    onToggleUnread: () -> Unit,
     onAnalyze: () -> Unit,
     onRollback: () -> Unit,
     onOpenWeb: () -> Unit,
     onDismissAlert: () -> Unit,
     onMuteWorkflow: () -> Unit,
 ) {
+    val framing = remember(msg) { GoldenCircleCopy.frame(msg) }
+    var showRawWhat by remember { mutableStateOf(false) }
+
     val stripeColor: Color = when {
         MessageCategoryHelper.isRecovery(msg.kind) -> FvColors.Add
         msg.severity == "critical" || msg.kind == "execution_failed" || msg.kind == "workflow_deleted" -> FvColors.Del
@@ -402,28 +464,34 @@ private fun MessengerCard(
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(14.dp))
-            .background(FvColors.Panel)
-            .clickable(onClick = onClick),
+            .background(if (unread) FvColors.Panel2 else FvColors.Panel)
+            .border(
+                width = 1.dp,
+                color = if (unread) FvColors.Accent.copy(alpha = 0.55f) else FvColors.Line,
+                shape = RoundedCornerShape(14.dp),
+            )
+            .combinedClickable(onClick = onOpenSheet, onLongClick = onToggleUnread),
     ) {
         Box(modifier = Modifier.width(4.dp).fillMaxHeight().background(stripeColor))
         Column(
-            modifier = Modifier.weight(1f).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.weight(1f).padding(13.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // ─── 1. WHY: Bedeutung & Auswirkung ───
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (unread) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(FvColors.Accent))
+                }
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(stripeColor.copy(alpha = 0.18f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
-                    Text(MessageCategoryHelper.badgeLabel(msg.kind), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = stripeColor)
+                    Text(framing.whyBadge, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = stripeColor)
                 }
                 if (showInstance) {
                     Text(msg.instance.name, style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
-                }
-                msg.version?.let { v ->
-                    Text("v${v.number}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = FvColors.Muted)
                 }
                 if (msg.groupCount > 1) {
                     Box(
@@ -436,38 +504,42 @@ private fun MessengerCard(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text(formatRelativeTime(msg.updatedAt), style = MaterialTheme.typography.labelSmall, color = FvColors.Dim)
-            }
-
-            Text(msg.title, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
-
-            msg.metadata.aiSummary?.let { ai ->
-                Text(ai.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = FvColors.AccentHi)
-                ai.details.take(3).forEach { bullet ->
-                    Text("• $bullet", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
-                }
+                Text(formatRelativeTime(msg.updatedAt), style = MaterialTheme.typography.labelSmall, color = if (unread) FvColors.AccentHi else FvColors.Dim)
             }
 
             Text(
-                msg.body,
+                framing.whyHeadline,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
+                color = FvColors.Text,
+            )
+            Text(
+                framing.whyImpact,
                 style = MaterialTheme.typography.bodySmall,
-                fontFamily = if (MessageCategoryHelper.isFail(msg.kind)) FontFamily.Monospace else FontFamily.Default,
                 color = FvColors.Muted,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
             )
 
-            msg.metadata.rollback?.let { rb ->
+            // KI-Stichpunkte bei Workflow-Änderungen
+            msg.metadata.aiSummary?.details?.takeIf { it.isNotEmpty() }?.let { bullets ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    bullets.take(3).forEach { bullet ->
+                        Text("• $bullet", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
+                    }
+                }
+            }
+
+            // ─── 2. HOW: Empfehlung, E2E-Diagnose & Handlungs-Buttons ───
+            if (diagnosis != null) {
+                DiagnosisBox(diagnosis)
+            } else if (framing.howRecommendation != null && msg.resolvedBySeq == null) {
                 Text(
-                    "Vorschlag: Zurücksetzen auf v${rb.number} (${rb.rate?.let { "${Math.round(it * 100)} %" } ?: "stabil"})",
+                    "Nächster Schritt: ${framing.howRecommendation}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = FvColors.Add,
+                    color = FvColors.AccentHi,
                 )
             }
 
-            diagnosis?.let { DiagnosisBox(it) }
-
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (MessageCategoryHelper.isFail(msg.kind) && msg.workflow != null) {
                     TextButton(
                         onClick = onAnalyze,
@@ -476,7 +548,7 @@ private fun MessengerCard(
                     ) {
                         if (isAnalyzing) {
                             CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp, color = FvColors.AccentHi)
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(5.dp))
                             Text("Analysiere…", style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
                         } else {
                             Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(14.dp), tint = FvColors.AccentHi)
@@ -505,19 +577,79 @@ private fun MessengerCard(
                         )
                     }
                 }
-                if (!msg.metadata.webPath.isNullOrBlank()) {
-                    TextButton(onClick = onOpenWeb, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-                        Text("Im Web öffnen", style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
-                    }
+                TextButton(
+                    onClick = onToggleUnread,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Icon(
+                        if (unread) Icons.Default.MarkEmailRead else Icons.Default.MarkEmailUnread,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (unread) FvColors.AccentHi else FvColors.Dim,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (unread) "Als gelesen" else "Ungelesen",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (unread) FvColors.AccentHi else FvColors.Dim,
+                    )
                 }
-                if ((msg.kind == "alert_opened" || msg.kind == "alert_escalated") && msg.alertId != null && msg.resolvedBySeq == null) {
-                    TextButton(onClick = onDismissAlert, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-                        Text("Ausblenden", style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
-                    }
+            }
+
+            // ─── 3. WHAT: Technische Rohdaten auf Wunsch einblenden ───
+            HorizontalDivider(color = FvColors.Line)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showRawWhat = !showRawWhat }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val metaLabel = buildString {
+                    msg.workflow?.let { append(it.name) }
+                    msg.version?.let { append(" · v${it.number}") }
+                    if (isEmpty()) append("Technische Details")
                 }
-                if (msg.workflow != null) {
-                    TextButton(onClick = onMuteWorkflow, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
-                        Text("1h stumm", style = MaterialTheme.typography.labelSmall, color = FvColors.Dim)
+                Text(metaLabel, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = FvColors.Dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (showRawWhat) "Weniger" else "Details", style = MaterialTheme.typography.labelSmall, color = FvColors.Dim)
+                    Icon(if (showRawWhat) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = FvColors.Dim, modifier = Modifier.size(16.dp))
+                }
+            }
+
+            AnimatedVisibility(visible = showRawWhat) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(FvColors.Panel3)
+                            .padding(10.dp),
+                    ) {
+                        Text(
+                            msg.metadata.errorMessage ?: msg.body,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = FvColors.Muted,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (!msg.metadata.webPath.isNullOrBlank()) {
+                            TextButton(onClick = onOpenWeb, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                                Text("Im Web öffnen", style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
+                            }
+                        }
+                        if ((msg.kind == "alert_opened" || msg.kind == "alert_escalated") && msg.alertId != null && msg.resolvedBySeq == null) {
+                            TextButton(onClick = onDismissAlert, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                                Text("Warnung ausblenden", style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
+                            }
+                        }
+                        if (msg.workflow != null) {
+                            TextButton(onClick = onMuteWorkflow, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) {
+                                Text("1h stumm", style = MaterialTheme.typography.labelSmall, color = FvColors.Dim)
+                            }
+                        }
                     }
                 }
             }

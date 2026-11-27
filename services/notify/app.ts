@@ -202,15 +202,18 @@ export function createApp(opts: {
 
   app.get('/mobile/v1/stream', (req, res) => {
     const device = res.locals.device as DeviceRecord;
+    req.socket.setNoDelay(true);
+    req.socket.setKeepAlive(true, 20_000);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
+    res.socket?.setNoDelay(true);
     res.flushHeaders?.();
 
     const lastIdRaw = req.headers['last-event-id'] ?? req.query.after;
     const after = lastIdRaw !== undefined && /^\d+$/.test(String(lastIdRaw)) ? Number(lastIdRaw) : undefined;
-    res.write(`event: ready\ndata: ${JSON.stringify({ latestSeq: store.latestSeq(), deviceId: device.id })}\n\n`);
+    res.write(`: connected\n\nevent: ready\ndata: ${JSON.stringify({ latestSeq: store.latestSeq(), deviceId: device.id, ts: Date.now() })}\n\n`);
 
     if (after !== undefined) {
       const missed = store.listMessages(device, { after, limit: 200 });
@@ -224,11 +227,58 @@ export function createApp(opts: {
 
   app.post('/mobile/v1/read', (req, res) => {
     const device = res.locals.device as DeviceRecord;
-    const instanceId = Number(req.body?.instanceId ?? 0);
-    const readSeq = Number(req.body?.readSeq ?? store.latestSeq());
+    const b = req.body ?? {};
+    // 1) Einzelne Nachricht gezielt als gelesen oder ungelesen markieren
+    if (b.seq !== undefined) {
+      const unread = b.unread !== false;
+      const out = store.setMessageUnread(device, Number(b.seq), unread);
+      hub.sendToDevice(device.id, 'read_sync', { instanceId: out.instanceId, seq: out.seq, unread: out.unread });
+      return void res.json({ ok: true, ...out });
+    }
+    // 2) Ganzen Kanal wieder als ungelesen markieren
+    if (b.unread === true) {
+      const instanceId = Number(b.instanceId ?? 0);
+      const seq = store.markChannelUnread(device, instanceId);
+      hub.sendToDevice(device.id, 'read_sync', { instanceId, seq, unread: true });
+      return void res.json({ ok: true, instanceId, seq, unread: true });
+    }
+    // 3) Ganzen Kanal bis readSeq als gelesen markieren
+    const instanceId = Number(b.instanceId ?? 0);
+    const readSeq = Number(b.readSeq ?? store.latestSeq());
     store.markRead(device, instanceId, readSeq);
-    hub.sendToDevice(device.id, 'read_sync', { instanceId, readSeq });
-    res.json({ ok: true, instanceId, readSeq });
+    hub.sendToDevice(device.id, 'read_sync', { instanceId, readSeq, unread: false });
+    res.json({ ok: true, instanceId, readSeq, unread: false });
+  });
+
+  // Selbsttest direkt vom Android-Gerät aus (prüft Echtzeit-Stream & System-Benachrichtigungen)
+  app.post('/mobile/v1/test', async (req, res) => {
+    const device = res.locals.device as DeviceRecord;
+    const instances = await core.instances().catch(() => []);
+    const first = instances.find((i) => device.instances === null || device.instances.includes(i.id)) ?? {
+      id: 0,
+      name: 'FlowVault',
+      color: '#c2663f',
+    };
+    const tr = requestT(req);
+    const ingested = store.ingest({
+      instanceId: first.id,
+      instanceName: first.name,
+      instanceColor: first.color,
+      kind: 'test',
+      severity: 'info',
+      title: tr('settings.notify.testTitle'),
+      body: tr('settings.notify.testBody', { device: device.name }),
+      metadata: { webPath: '/settings' },
+    });
+    let pushSent = false;
+    if (ingested) {
+      const redacted = redactMessage({ ...ingested.message, unread: true }, device.redactionMode);
+      hub.sendToDevice(device.id, 'message', redacted, redacted.updatedSeq);
+      if (device.pushType === 'unifiedpush' && device.pushEndpoint) {
+        pushSent = await push.sendWakeup(device.pushEndpoint, redacted.updatedSeq);
+      }
+    }
+    res.json({ ok: true, seq: ingested?.message.seq ?? null, pushSent });
   });
 
   app.put('/mobile/v1/device', async (req, res) => {

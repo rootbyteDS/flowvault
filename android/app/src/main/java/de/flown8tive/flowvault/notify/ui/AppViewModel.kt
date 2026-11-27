@@ -47,13 +47,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _bannerMessage = MutableStateFlow<String?>(null)
     val bannerMessage: StateFlow<String?> = _bannerMessage.asStateFlow()
 
-    private val _activeInstanceId = MutableStateFlow<Int?>(null)
-
     val connectionState: StateFlow<ConnectionState> = repo.connectionState
+    val lastHeartbeatAt: StateFlow<Long> = repo.lastHeartbeatFlow
     val allowRollback: StateFlow<Boolean> = repo.allowRollbackFlow
     val channels: StateFlow<List<ChannelEntity>> = repo.channelsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val openAlerts: StateFlow<List<MessageEntity>> = repo.openAlertMessagesFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val unreadMessages: StateFlow<List<MessageEntity>> = repo.unreadMessagesFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var foregroundStream: EventSource? = null
@@ -61,8 +62,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (prefs.isPaired) {
+            ensureRealtimeRunningIfConfigured()
             refresh()
             startForegroundStream()
+        }
+    }
+
+    private fun ensureRealtimeRunningIfConfigured() {
+        if (prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) {
+            RealtimeSyncService.start(app)
         }
     }
 
@@ -75,11 +83,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setActiveInstance(instanceId: Int?) {
-        _activeInstanceId.value = instanceId
+        repo.activeInstanceId = instanceId
         if (instanceId != null && instanceId > 0) {
             viewModelScope.launch {
                 runCatching { repo.loadInstanceHistory(instanceId) }
-                runCatching { repo.markChannelRead(instanceId) }
             }
         }
     }
@@ -95,7 +102,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 repo.pair(serverUrl, code, deviceName)
                 _isPaired.value = true
                 SyncWorker.schedulePeriodic(app)
-                startForegroundStream()
+                ensureRealtimeRunningIfConfigured()
                 onSuccess()
             } catch (e: Exception) {
                 _bannerMessage.value = e.message ?: "Kopplung fehlgeschlagen"
@@ -113,6 +120,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 repo.syncFull(notifyNew = false)
             } catch (e: Exception) {
                 _bannerMessage.value = e.message ?: "Sync fehlgeschlagen"
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun reconnectRealtime() {
+        if (!prefs.isPaired) return
+        if (prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) {
+            RealtimeSyncService.reconnectNow(app)
+            _bannerMessage.value = "Echtzeit-Verbindung wird neu aufgebaut…"
+        } else {
+            startForegroundStream()
+            refresh()
+        }
+    }
+
+    fun sendSelfTest() {
+        viewModelScope.launch {
+            _busy.value = true
+            try {
+                repo.sendSelfTest()
+                _bannerMessage.value = "Test-Signal ausgelöst – Benachrichtigung sollte sofort erscheinen"
+            } catch (e: Exception) {
+                _bannerMessage.value = e.message ?: "Test fehlgeschlagen"
             } finally {
                 _busy.value = false
             }
@@ -169,7 +201,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun markChannelRead(instanceId: Int) {
-        viewModelScope.launch { runCatching { repo.markChannelRead(instanceId) } }
+        viewModelScope.launch {
+            runCatching { repo.markChannelRead(instanceId) }
+                .onSuccess { _bannerMessage.value = "Kanal als gelesen markiert" }
+        }
+    }
+
+    fun markChannelUnread(instanceId: Int) {
+        viewModelScope.launch {
+            runCatching { repo.markChannelUnread(instanceId) }
+                .onSuccess { _bannerMessage.value = "Kanal als ungelesen markiert" }
+        }
+    }
+
+    fun setMessageUnread(seq: Long, instanceId: Int, unread: Boolean) {
+        viewModelScope.launch {
+            runCatching { repo.setMessageUnread(seq, instanceId, unread) }
+                .onSuccess {
+                    _bannerMessage.value = if (unread) "Als ungelesen markiert" else "Als gelesen markiert"
+                }
+        }
     }
 
     fun muteInstance(instanceId: Int, durationMs: Long?) {
@@ -203,6 +254,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 when (mode) {
                     DeliveryMode.UNIFIED_PUSH -> {
+                        stopForegroundStream()
                         RealtimeSyncService.stop(app)
                         val pkg = distributorPackage ?: UnifiedPushManager.discoverDistributors(app).firstOrNull()?.packageName
                         if (pkg == null) {
@@ -212,20 +264,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         prefs.unifiedPushDistributor = pkg
                         prefs.deliveryMode = DeliveryMode.UNIFIED_PUSH
                         UnifiedPushManager.register(app, pkg)
+                        startForegroundStream()
                         _bannerMessage.value = "UnifiedPush-Registrierung angefordert…"
                     }
                     DeliveryMode.REALTIME_SERVICE -> {
+                        stopForegroundStream()
                         prefs.unifiedPushDistributor?.let { UnifiedPushManager.unregister(app, it) }
                         repo.updateDelivery(DeliveryMode.REALTIME_SERVICE, null)
                         RealtimeSyncService.start(app)
-                        _bannerMessage.value = "Echtzeit-Dienst aktiviert"
+                        _bannerMessage.value = "Echtzeit-Schutz im Hintergrund aktiviert"
                     }
                     DeliveryMode.PERIODIC -> {
                         prefs.unifiedPushDistributor?.let { UnifiedPushManager.unregister(app, it) }
                         RealtimeSyncService.stop(app)
                         repo.updateDelivery(DeliveryMode.PERIODIC, null)
                         SyncWorker.schedulePeriodic(app)
-                        _bannerMessage.value = "Periodischer Sync aktiviert"
+                        startForegroundStream()
+                        _bannerMessage.value = "Sparmodus (15-Min.-Sync) aktiviert"
                     }
                 }
             } catch (e: Exception) {
@@ -261,23 +316,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!prefs.isPaired) return
         if (prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) return
         val url = prefs.serverUrl ?: return
-        val token = prefs.deviceToken ?: return
+        val token = app.prefs.deviceToken ?: return
         foregroundStream?.cancel()
         repo.setConnectionState(ConnectionState.CONNECTING)
         foregroundStream = repo.api.openStream(
             serverUrl = url,
             token = token,
             afterSeq = prefs.latestSeq,
-            onConnected = { repo.setConnectionState(ConnectionState.LIVE) },
+            onConnected = {
+                repo.recordHeartbeat()
+                repo.setConnectionState(ConnectionState.LIVE)
+            },
+            onHeartbeat = { repo.recordHeartbeat() },
             onMessage = { dto, isNew ->
-                viewModelScope.launch { repo.handleStreamMessage(dto, isNew, _activeInstanceId.value) }
+                viewModelScope.launch { repo.handleStreamMessage(dto, isNew) }
             },
             onFailure = {
                 repo.setConnectionState(ConnectionState.OFFLINE)
                 reconnectJob?.cancel()
                 reconnectJob = viewModelScope.launch {
-                    delay(5_000)
-                    if (prefs.isPaired) startForegroundStream()
+                    delay(4_000)
+                    if (prefs.isPaired && prefs.deliveryMode != DeliveryMode.REALTIME_SERVICE) startForegroundStream()
                 }
             },
         )

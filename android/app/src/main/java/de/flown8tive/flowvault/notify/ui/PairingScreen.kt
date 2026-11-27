@@ -117,12 +117,12 @@ fun PairingScreen(
                 }
                 Column {
                     Text("FlowVault Notify", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
-                    Text("Messenger für n8n Fails & Änderungen", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
+                    Text("Sicherheit für deine n8n-Instanzen in der Tasche", style = MaterialTheme.typography.bodySmall, color = FvColors.AccentHi)
                 }
             }
 
             Text(
-                "Öffne in FlowVault „Einstellungen → Mobile App & Benachrichtigungen“, aktiviere den Zugang und scanne den QR-Code.",
+                "Warum: Sofort wissen, wenn ein Workflow ausfällt, verschlüsselt die Ursache prüfen und bei Bedarf per Fingerabdruck auf die letzte stabile Version zurückspielen.\n\nWie: Öffne in FlowVault „Einstellungen → Mobile App“ und scanne den einmaligen QR-Code.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = FvColors.Muted,
             )

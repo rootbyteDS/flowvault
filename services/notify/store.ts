@@ -403,6 +403,17 @@ export function createStore(db: DatabaseSync) {
       updated_at  INTEGER NOT NULL,
       PRIMARY KEY (device_id, instance_id)
     );
+
+    -- Explizite Gelesen/Ungelesen-Markierungen einzelner Nachrichten pro Gerät
+    CREATE TABLE IF NOT EXISTS device_message_state (
+      device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      seq         INTEGER NOT NULL REFERENCES messages(seq) ON DELETE CASCADE,
+      instance_id INTEGER NOT NULL,
+      unread      INTEGER NOT NULL, -- 1 = ausdrücklich ungelesen, 0 = ausdrücklich gelesen
+      updated_at  INTEGER NOT NULL,
+      PRIMARY KEY (device_id, seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dev_msg_state_inst ON device_message_state(device_id, instance_id);
   `);
 
   // Additive Migrationen für bestehende Installationen
@@ -925,7 +936,28 @@ export function createStore(db: DatabaseSync) {
       const order = q.after !== undefined ? 'ORDER BY updated_seq ASC, seq ASC' : 'ORDER BY seq DESC';
       const sql = `SELECT * FROM messages ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ${order} LIMIT ?`;
       const rows = db.prepare(sql).all(...params, limit * (q.category ? 3 : 1)) as unknown as MessageRow[];
-      let msgs = rows.map(toMessage);
+
+      const readRows = db
+        .prepare('SELECT instance_id, read_seq FROM device_read_state WHERE device_id = ?')
+        .all(device.id) as { instance_id: number; read_seq: number }[];
+      const readByInst = new Map(readRows.map((r) => [r.instance_id, r.read_seq]));
+      const globalRead = readByInst.get(0) ?? 0;
+
+      const overrides = new Map<number, boolean>();
+      if (rows.length) {
+        const ovRows = db
+          .prepare(`SELECT seq, unread FROM device_message_state WHERE device_id = ? AND seq IN (${rows.map(() => '?').join(',')})`)
+          .all(device.id, ...rows.map((r) => r.seq)) as { seq: number; unread: number }[];
+        for (const o of ovRows) overrides.set(o.seq, o.unread === 1);
+      }
+
+      let msgs = rows.map((r) => {
+        const m = toMessage(r);
+        const chRead = Math.max(globalRead, readByInst.get(r.instance_id) ?? 0);
+        const ov = overrides.get(r.seq);
+        m.unread = ov !== undefined ? ov : r.seq > chRead;
+        return m;
+      });
       if (q.category) msgs = msgs.filter((m) => categoryOfKind(m.kind) === q.category).slice(0, limit);
       return msgs.map((m) => redactMessage(m, device.redactionMode));
     },
@@ -993,6 +1025,41 @@ export function createStore(db: DatabaseSync) {
            read_seq = MAX(device_read_state.read_seq, excluded.read_seq),
            updated_at = excluded.updated_at`,
       ).run(device.id, instanceId, readSeq, now);
+      if (instanceId > 0) {
+        db.prepare('DELETE FROM device_message_state WHERE device_id = ? AND instance_id = ? AND seq <= ?').run(device.id, instanceId, readSeq);
+      } else {
+        db.prepare('DELETE FROM device_message_state WHERE device_id = ? AND seq <= ?').run(device.id, readSeq);
+      }
+    },
+
+    /** Markiert einen Kanal wieder als ungelesen (über die neueste Nachricht des Kanals). */
+    markChannelUnread(device: DeviceRecord, instanceId: number, now = Date.now()): number | null {
+      if (!Number.isSafeInteger(instanceId) || instanceId <= 0) throw new HttpError(400, 'errors.http.invalidId');
+      if (!allowedFor(device, instanceId)) throw new HttpError(403, 'errors.notify.instanceForbidden');
+      const last = db
+        .prepare('SELECT seq FROM messages WHERE instance_id = ? ORDER BY seq DESC LIMIT 1')
+        .get(instanceId) as { seq: number } | undefined;
+      if (!last) return null;
+      db.prepare(
+        `INSERT INTO device_message_state (device_id, seq, instance_id, unread, updated_at)
+         VALUES (?,?,?,1,?)
+         ON CONFLICT(device_id, seq) DO UPDATE SET unread = 1, updated_at = excluded.updated_at`,
+      ).run(device.id, last.seq, instanceId, now);
+      return last.seq;
+    },
+
+    /** Markiert eine einzelne Nachricht gezielt als gelesen oder ungelesen. */
+    setMessageUnread(device: DeviceRecord, seq: number, unread: boolean, now = Date.now()): { instanceId: number; seq: number; unread: boolean } {
+      if (!Number.isSafeInteger(seq) || seq <= 0) throw new HttpError(400, 'errors.http.invalidId');
+      const row = db.prepare('SELECT seq, instance_id FROM messages WHERE seq = ?').get(seq) as { seq: number; instance_id: number } | undefined;
+      if (!row) throw new HttpError(404, 'errors.notify.messageNotFound');
+      if (!allowedFor(device, row.instance_id)) throw new HttpError(403, 'errors.notify.instanceForbidden');
+      db.prepare(
+        `INSERT INTO device_message_state (device_id, seq, instance_id, unread, updated_at)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(device_id, seq) DO UPDATE SET unread = excluded.unread, updated_at = excluded.updated_at`,
+      ).run(device.id, seq, row.instance_id, unread ? 1 : 0, now);
+      return { instanceId: row.instance_id, seq, unread };
     },
 
     shouldNotifyDevice(device: DeviceRecord, msg: NotifyMessage, now = Date.now()): boolean {
@@ -1043,8 +1110,14 @@ export function createStore(db: DatabaseSync) {
           .prepare('SELECT * FROM messages WHERE instance_id = ? ORDER BY seq DESC LIMIT 1')
           .get(inst.id) as unknown as MessageRow | undefined;
         const { n: unreadCount } = db
-          .prepare('SELECT COUNT(*) AS n FROM messages WHERE instance_id = ? AND seq > ?')
-          .get(inst.id, readSeq) as { n: number };
+          .prepare(
+            `SELECT COUNT(*) AS n
+               FROM messages m
+               LEFT JOIN device_message_state dms ON dms.device_id = ? AND dms.seq = m.seq
+              WHERE m.instance_id = ?
+                AND COALESCE(dms.unread, CASE WHEN m.seq > ? THEN 1 ELSE 0 END) = 1`,
+          )
+          .get(device.id, inst.id, readSeq) as { n: number };
         const rule = rules.find((r) => r.scopeType === 'instance' && r.scopeId === inst.id);
         return {
           instanceId: inst.id,

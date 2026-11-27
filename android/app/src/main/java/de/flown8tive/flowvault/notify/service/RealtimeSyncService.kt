@@ -1,9 +1,14 @@
 package de.flown8tive.flowvault.notify.service
 
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import androidx.core.content.ContextCompat
@@ -20,14 +25,23 @@ import kotlinx.coroutines.launch
 import okhttp3.sse.EventSource
 
 /**
- * Optionaler Foreground-Service für Echtzeit-Zustellung im LAN/Tailscale/VPN ganz ohne externen Push-Dienst.
- * Hält einen SSE-Stream (/mobile/v1/stream) mit exponentiellem Backoff offen.
+ * Zuverlässiger Echtzeit-Hintergrunddienst (specialUse FGS ohne 6h-Timeout unter Android 14/15):
+ * - Überwacht WLAN-/Mobilfunkwechsel aktiv via `ConnectivityManager.NetworkCallback`
+ * - Erkennt tote („half-open“) Sockets über 45s-Read-Timeout gegen den 20s-Server-Heartbeat
+ * - Holt nach jedem Reconnect per `syncFull` verpasste Nachrichten lückenlos nach
  */
 class RealtimeSyncService : Service() {
     companion object {
+        const val ACTION_RECONNECT = "de.flown8tive.flowvault.notify.ACTION_RECONNECT"
+
         fun start(context: Context) {
             val intent = Intent(context, RealtimeSyncService::class.java)
-            ContextCompat.startForegroundService(context, intent)
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun reconnectNow(context: Context) {
+            val intent = Intent(context, RealtimeSyncService::class.java).apply { action = ACTION_RECONNECT }
+            runCatching { ContextCompat.startForegroundService(context, intent) }
         }
 
         fun stop(context: Context) {
@@ -38,15 +52,43 @@ class RealtimeSyncService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var eventSource: EventSource? = null
     private var reconnectJob: Job? = null
-    private var backoffMs = 2_000L
+    private var backoffMs = 1_500L
+    private var networkCallbackRegistered = false
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            backoffMs = 1_000L
+            reconnectJob?.cancel()
+            scope.launch {
+                val app = application as? FlowVaultApp ?: return@launch
+                if (!app.prefs.isPaired) return@launch
+                connect()
+                runCatching { app.repository.syncFull(notifyNew = true) }
+            }
+        }
+
+        override fun onLost(network: Network) {
+            (application as? FlowVaultApp)?.repository?.setConnectionState(ConnectionState.OFFLINE)
+            updateServiceNotification("Warte auf Netzwerkverbindung…")
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        registerNetworkWatcher()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val app = application as FlowVaultApp
-        val notif = app.notifications.buildForegroundServiceNotification("Verbunden mit FlowVault")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NotificationHelper.SERVICE_NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        val notif = app.notifications.buildForegroundServiceNotification("Verbinde Echtzeit-Schutz…")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NotificationHelper.SERVICE_NOTIFICATION_ID,
+                notif,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
         } else {
             startForeground(NotificationHelper.SERVICE_NOTIFICATION_ID, notif)
         }
@@ -54,10 +96,16 @@ class RealtimeSyncService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_RECONNECT) {
+            backoffMs = 1_000L
+            reconnectJob?.cancel()
+        }
         connect()
+        scope.launch { runCatching { app.repository.syncFull(notifyNew = true) } }
         return START_STICKY
     }
 
+    @Synchronized
     private fun connect() {
         val app = application as FlowVaultApp
         val url = app.prefs.serverUrl ?: return
@@ -70,14 +118,20 @@ class RealtimeSyncService : Service() {
             token = token,
             afterSeq = app.prefs.latestSeq,
             onConnected = {
-                backoffMs = 2_000L
+                backoffMs = 1_500L
+                app.repository.recordHeartbeat()
                 app.repository.setConnectionState(ConnectionState.LIVE)
+                updateServiceNotification("Echtzeit-Schutz aktiv · Live verbunden")
+            },
+            onHeartbeat = {
+                app.repository.recordHeartbeat()
             },
             onMessage = { dto, isNew ->
                 scope.launch { app.repository.handleStreamMessage(dto, isNew) }
             },
             onFailure = {
                 app.repository.setConnectionState(ConnectionState.OFFLINE)
+                updateServiceNotification("Verbindung getrennt · verbinde neu…")
                 scheduleReconnect()
             },
         )
@@ -86,13 +140,46 @@ class RealtimeSyncService : Service() {
     private fun scheduleReconnect() {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
-            delay(backoffMs)
-            backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
+            val wait = backoffMs
+            backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
+            delay(wait)
             connect()
         }
     }
 
+    private fun updateServiceNotification(status: String) {
+        val app = application as? FlowVaultApp ?: return
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        runCatching {
+            nm.notify(NotificationHelper.SERVICE_NOTIFICATION_ID, app.notifications.buildForegroundServiceNotification(status))
+        }
+    }
+
+    private fun registerNetworkWatcher() {
+        if (networkCallbackRegistered) return
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        val req = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        runCatching {
+            cm.registerNetworkCallback(req, networkCallback)
+            networkCallbackRegistered = true
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val app = application as? FlowVaultApp
+        if (app?.prefs?.isPaired == true) {
+            SyncWorker.enqueueImmediate(this)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        if (networkCallbackRegistered) {
+            runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(networkCallback) }
+            networkCallbackRegistered = false
+        }
         reconnectJob?.cancel()
         eventSource?.cancel()
         (application as? FlowVaultApp)?.repository?.setConnectionState(ConnectionState.OFFLINE)

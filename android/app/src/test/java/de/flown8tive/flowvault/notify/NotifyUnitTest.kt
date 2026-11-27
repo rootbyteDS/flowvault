@@ -5,9 +5,15 @@ import de.flown8tive.flowvault.notify.model.DeliveryMode
 import de.flown8tive.flowvault.notify.model.DiagnosisDto
 import de.flown8tive.flowvault.notify.model.EncryptedEnvelopeDto
 import de.flown8tive.flowvault.notify.model.FlowVaultJson
+import de.flown8tive.flowvault.notify.model.GoldenCircleCopy
+import de.flown8tive.flowvault.notify.model.InstanceRefDto
 import de.flown8tive.flowvault.notify.model.MessageCategoryHelper
 import de.flown8tive.flowvault.notify.model.MessageDto
+import de.flown8tive.flowvault.notify.model.MessageMetadataDto
 import de.flown8tive.flowvault.notify.model.PairingUriParser
+import de.flown8tive.flowvault.notify.model.RollbackHintDto
+import de.flown8tive.flowvault.notify.model.VersionRefDto
+import de.flown8tive.flowvault.notify.model.WorkflowRefDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -127,5 +133,32 @@ class NotifyUnitTest {
             update(canonical.toByteArray(StandardCharsets.UTF_8))
         }
         assertTrue(verifier.verify(sigBytes))
+    }
+
+    @Test
+    fun goldenCircleFramingHighlightsWhyAndHowClearly() {
+        val alertMsg = MessageDto(
+            seq = 10,
+            instance = InstanceRefDto(1, "Produktion"),
+            workflow = WorkflowRefDto(5, "Invoice Sync"),
+            version = VersionRefDto(22, 14),
+            kind = "alert_opened",
+            severity = "critical",
+            title = "Fehlerquote gestiegen",
+            body = "45 % Fehler",
+            unread = true,
+            metadata = MessageMetadataDto(
+                rate = 0.45,
+                baselineRate = 0.0,
+                rollback = RollbackHintDto(21, 13, 0.0),
+            ),
+            createdAt = 1764097200000,
+        )
+        val framed = GoldenCircleCopy.frame(alertMsg)
+        assertEquals("KRITISCHE STÖRUNG", framed.whyBadge)
+        assertTrue(framed.whyHeadline.contains("45 %"))
+        assertTrue(framed.whyImpact.contains("Invoice Sync"))
+        assertTrue(framed.howRecommendation!!.contains("v13"))
+        assertEquals(true, alertMsg.unread)
     }
 }

@@ -35,6 +35,8 @@ function externalOrigin(req: Request): string {
 
 /** Streamt GET /mobile/v1/stream (SSE) direkt vom Notify-Dienst ohne Zwischenpufferung. */
 function proxySse(req: Request, res: Response, key: string) {
+  req.socket.setNoDelay(true);
+  req.socket.setKeepAlive(true, 20_000);
   const target = new URL(`${NOTIFY_URL}/mobile/v1${req.url}`);
   const headers: Record<string, string> = { 'X-Internal-Token': NOTIFY_TOKEN };
   for (const h of FORWARD_REQ) if (typeof req.headers[h] === 'string') headers[h] = req.headers[h] as string;
@@ -59,6 +61,7 @@ function proxySse(req: Request, res: Response, key: string) {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
       }
+      res.socket?.setNoDelay(true);
       res.flushHeaders?.();
       up.pipe(res);
     },

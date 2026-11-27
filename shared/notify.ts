@@ -191,6 +191,8 @@ export interface NotifyMessage {
   body: string;
   groupCount: number;
   resolvedBySeq: number | null;
+  /** Gerätespezifischer Lesestatus (berücksichtigt Kanal-readSeq und Einzel-Markierungen). */
+  unread?: boolean;
   metadata: NotifyMessageMetadata;
   createdAt: number;
   updatedAt: number;

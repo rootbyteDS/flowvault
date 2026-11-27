@@ -155,6 +155,7 @@ data class MessageDto(
     val body: String,
     val groupCount: Int = 1,
     val resolvedBySeq: Long? = null,
+    val unread: Boolean? = null,
     val metadata: MessageMetadataDto = MessageMetadataDto(),
     val createdAt: Long,
     val updatedAt: Long = createdAt,
@@ -201,8 +202,10 @@ data class BootstrapDto(
 
 @Serializable
 data class ReadRequestDto(
-    val instanceId: Int,
-    val readSeq: Long,
+    val instanceId: Int? = null,
+    val readSeq: Long? = null,
+    val seq: Long? = null,
+    val unread: Boolean? = null,
 )
 
 @Serializable
@@ -352,5 +355,100 @@ object MessageCategoryHelper {
         "initial_sync" -> "IMPORT"
         "test" -> "TEST"
         else -> kind.uppercase()
+    }
+}
+
+/**
+ * Übersetzt technische Ereignisse in das Golden-Circle-Modell (WHY -> HOW -> WHAT):
+ * Zuerst Bedeutung & Auswirkung für den Betrieb (WHY), dann klare Handlungsempfehlung (HOW),
+ * zuletzt die technischen Rohdaten (WHAT).
+ */
+object GoldenCircleCopy {
+    data class CardFraming(
+        val whyBadge: String,
+        val whyHeadline: String,
+        val whyImpact: String,
+        val howRecommendation: String?,
+    )
+
+    fun frame(msg: MessageDto): CardFraming {
+        val wf = msg.workflow?.name ?: msg.instance.name
+        val ver = msg.version?.number?.let { "v$it" }
+        return when (msg.kind) {
+            "alert_opened", "alert_escalated" -> {
+                val pct = msg.metadata.rate?.let { "${Math.round(it * 100)} %" } ?: "Hoher Anteil"
+                val basePct = msg.metadata.baselineRate?.let { "${Math.round(it * 100)} %" } ?: "0 %"
+                val rb = msg.metadata.rollback?.number
+                CardFraming(
+                    whyBadge = "KRITISCHE STÖRUNG",
+                    whyHeadline = "$pct der Läufe brechen ab${ver?.let { " (seit $it)" } ?: ""}",
+                    whyImpact = "„$wf“ verliert aktiv Ausführungen (vorher $basePct Fehlerquote).",
+                    howRecommendation = if (rb != null) {
+                        "Ursache prüfen oder direkt auf die letzte stabile Version v$rb zurückspielen."
+                    } else {
+                        "Ursache analysieren, um die auslösende Änderung zu sehen."
+                    },
+                )
+            }
+            "execution_failed" -> {
+                val node = msg.metadata.errorNode ?: msg.metadata.failingNodes?.firstOrNull()?.name
+                val burst = if (msg.groupCount > 1) "${msg.groupCount} Fehlläufe gebündelt" else "Einzelner Fehllauf"
+                CardFraming(
+                    whyBadge = "AUSFALL IM LAUF",
+                    whyHeadline = if (node != null) "Abbruch am Node „$node“" else "Ausführung von „$wf“ fehlgeschlagen",
+                    whyImpact = "$burst auf ${msg.instance.name} · Workflow „$wf“.",
+                    howRecommendation = "Prüfe per E2E-Analyse, ob ein geänderter Parameter oder ein externer Dienst die Ursache ist.",
+                )
+            }
+            "sync_error" -> CardFraming(
+                whyBadge = "SICHERUNG UNTERBROCHEN",
+                whyHeadline = "Instanz „${msg.instance.name}“ antwortet nicht",
+                whyImpact = "Neue Workflow-Änderungen werden aktuell nicht gesichert.",
+                howRecommendation = "Erreichbarkeit und n8n-API-Key in FlowVault prüfen.",
+            )
+            "health_poll_error" -> CardFraming(
+                whyBadge = "MONITORING EINGESCHRÄNKT",
+                whyHeadline = "Ausführungen von „${msg.instance.name}“ nicht abrufbar",
+                whyImpact = "Fehlläufe dieser Instanz können vorübergehend verzögert erkannt werden.",
+                howRecommendation = "API-Berechtigung für Executions oder Netzwerkverbindung prüfen.",
+            )
+            "alert_resolved", "execution_recovered", "sync_recovered", "health_poll_recovered" -> CardFraming(
+                whyBadge = "ENTWARNUNG",
+                whyHeadline = "„$wf“ läuft wieder stabil",
+                whyImpact = msg.body,
+                howRecommendation = null,
+            )
+            "workflow_changed" -> {
+                val activeText = when (msg.metadata.activeChanged) {
+                    true -> "Workflow wurde aktiviert"
+                    false -> "Workflow wurde deaktiviert"
+                    null -> "Neue Version ${ver ?: ""} gesichert".trim()
+                }
+                CardFraming(
+                    whyBadge = if (msg.metadata.activeChanged != null) "STATUS-ÄNDERUNG" else "VERSION GESICHERT",
+                    whyHeadline = "$wf · $activeText",
+                    whyImpact = msg.metadata.aiSummary?.title ?: msg.body,
+                    howRecommendation = null,
+                )
+            }
+            "workflow_deleted" -> CardFraming(
+                whyBadge = "IN N8N ENTFERNT",
+                whyHeadline = "Workflow „$wf“ wurde in n8n gelöscht",
+                whyImpact = "Alle bisherigen Versionen bleiben sicher im FlowVault-Archiv erhalten.",
+                howRecommendation = "Bei versehentlichem Löschen in FlowVault als Kopie wiederherstellen.",
+            )
+            "workflow_restored" -> CardFraming(
+                whyBadge = "ZURÜCKGESPIELT",
+                whyHeadline = "„$wf“ wurde wiederhergestellt${ver?.let { " ($it)" } ?: ""}",
+                whyImpact = msg.body,
+                howRecommendation = null,
+            )
+            else -> CardFraming(
+                whyBadge = MessageCategoryHelper.badgeLabel(msg.kind),
+                whyHeadline = msg.title,
+                whyImpact = msg.body,
+                howRecommendation = null,
+            )
+        }
     }
 }

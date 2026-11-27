@@ -349,10 +349,26 @@ test('burst coalescing, silent AI update, alert resolution, instance scoping, re
   assert.deepEqual(dismissedAlerts, [77]);
   assert.equal((await mobile('/alerts/88/dismiss', dev1.token, { method: 'POST' })).status, 403);
 
-  // 6) Read-State aktualisiert unreadCount auf 0
+  // 6) Read-State aktualisiert unreadCount auf 0 + gezieltes Als-Ungelesen-Markieren (einzeln & Kanal)
   assert.equal((await mobile('/read', dev1.token, { method: 'POST', body: JSON.stringify({ instanceId: 1, readSeq: resolvedRes.seq }) })).status, 200);
   const bootAfterRead = (await (await mobile('/bootstrap', dev1.token)).json()) as NotifyBootstrap;
   assert.equal(bootAfterRead.channels[0]!.unreadCount, 0);
+
+  // Einzelne Nachricht wieder als ungelesen markieren
+  assert.equal((await mobile('/read', dev1.token, { method: 'POST', body: JSON.stringify({ seq: openedRes.seq, unread: true }) })).status, 200);
+  const bootAfterSingleUnread = (await (await mobile('/bootstrap', dev1.token)).json()) as NotifyBootstrap;
+  assert.equal(bootAfterSingleUnread.channels[0]!.unreadCount, 1);
+  const msgsWithUnread = (await (await mobile('/messages?instance=1', dev1.token)).json()) as { items: NotifyMessage[] };
+  assert.equal(msgsWithUnread.items.find((m) => m.seq === openedRes.seq)?.unread, true);
+  assert.equal(msgsWithUnread.items.find((m) => m.seq === resolvedRes.seq)?.unread, false);
+
+  // Einzelne Nachricht wieder als gelesen markieren → 0 ungelesen
+  assert.equal((await mobile('/read', dev1.token, { method: 'POST', body: JSON.stringify({ seq: openedRes.seq, unread: false }) })).status, 200);
+  assert.equal(((await (await mobile('/bootstrap', dev1.token)).json()) as NotifyBootstrap).channels[0]!.unreadCount, 0);
+
+  // Ganzen Kanal als ungelesen markieren → markiert letzte Nachricht als ungelesen
+  assert.equal((await mobile('/read', dev1.token, { method: 'POST', body: JSON.stringify({ instanceId: 1, unread: true }) })).status, 200);
+  assert.equal(((await (await mobile('/bootstrap', dev1.token)).json()) as NotifyBootstrap).channels[0]!.unreadCount, 1);
 });
 
 test('quiet hours allow critical overrides and block normal messages inside window', () => {
