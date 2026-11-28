@@ -3,6 +3,7 @@ import { decrypt, pack, sha256, unpack } from './crypto.ts';
 import { N8nClient, type N8nWorkflow } from './n8n.ts';
 import { onVersionCreated } from './ai.ts';
 import { describeChangeSummary, emitNotify } from './notify.ts';
+import { buildN8nUrl, cleanInstanceUrl } from '../shared/notify.ts';
 import { mappingSetFor, workflowLabelsFor, targetWorkflowFor } from './promote/mappings.ts';
 import { requirePair } from './promote/pairs.ts';
 import { transformSnapshot, hasDynamicReferences, workflowDependencies } from './promote/transform.ts';
@@ -191,6 +192,9 @@ export function recordWorkflow(
         activeChanged: txOut.summary.activeChanged,
         restoredFrom: opts.restoredFrom,
         webPath,
+        instanceUrl: cleanInstanceUrl(inst.base_url),
+        n8nWorkflowId: snap.n8nId,
+        n8nUrl: buildN8nUrl({ instanceUrl: inst.base_url, n8nWorkflowId: snap.n8nId }),
       },
       createdAt: now,
     });
@@ -247,7 +251,12 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
         severity: 'info',
         title: `Erstsicherung abgeschlossen: ${inst.name}`,
         body: `${stats.created} Workflows erstmals gesichert.`,
-        metadata: { importedCount: stats.created, webPath: `/instances/${inst.id}` },
+        metadata: {
+          importedCount: stats.created,
+          webPath: `/instances/${inst.id}`,
+          instanceUrl: cleanInstanceUrl(inst.base_url),
+          n8nUrl: cleanInstanceUrl(inst.base_url),
+        },
       });
     }
 
@@ -274,7 +283,12 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
           severity: 'high',
           title: `Workflow gelöscht: ${w.name}`,
           body: 'In n8n entfernt – die Versionshistorie bleibt in FlowVault erhalten.',
-          metadata: { webPath: `/workflows/${w.id}` },
+          metadata: {
+            webPath: `/workflows/${w.id}`,
+            instanceUrl: cleanInstanceUrl(inst.base_url),
+            n8nWorkflowId: w.n8n_id,
+            n8nUrl: cleanInstanceUrl(inst.base_url),
+          },
           createdAt: now,
         });
       }
@@ -294,7 +308,11 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
         severity: 'info',
         title: `Sync wieder aktiv: ${inst.name}`,
         body: `Backup-Sync war wieder erfolgreich (${stats.total} Workflows geprüft).`,
-        metadata: { webPath: `/instances/${inst.id}` },
+        metadata: {
+          webPath: `/instances/${inst.id}`,
+          instanceUrl: cleanInstanceUrl(inst.base_url),
+          n8nUrl: cleanInstanceUrl(inst.base_url),
+        },
       });
     }
     return { skipped: false as const, ...stats };
@@ -315,7 +333,12 @@ export async function syncInstance(instanceId: number, trigger: 'manual' | 'sche
         severity: 'critical',
         title: `Sync fehlgeschlagen: ${inst.name}`,
         body: rendered,
-        metadata: { errorMessage: rendered, webPath: `/instances/${inst.id}` },
+        metadata: {
+          errorMessage: rendered,
+          webPath: `/instances/${inst.id}`,
+          instanceUrl: cleanInstanceUrl(inst.base_url),
+          n8nUrl: cleanInstanceUrl(inst.base_url),
+        },
       });
     }
     throw e;

@@ -139,6 +139,10 @@ data class MessageMetadataDto(
     val restoredFrom: Int? = null,
     val importedCount: Int? = null,
     val webPath: String? = null,
+    val instanceUrl: String? = null,
+    val n8nWorkflowId: String? = null,
+    val executionId: String? = null,
+    val n8nUrl: String? = null,
 )
 
 @Serializable
@@ -180,6 +184,7 @@ data class ChannelDto(
     val instanceId: Int,
     val name: String,
     val color: String = "#ea4b71",
+    val instanceUrl: String? = null,
     val enabled: Boolean = true,
     val lastSyncOk: Boolean? = null,
     val openAlerts: Int = 0,
@@ -450,5 +455,77 @@ object GoldenCircleCopy {
                 howRecommendation = null,
             )
         }
+    }
+}
+
+/**
+ * Löst direkte Sprunglinks in die n8n-Instanz, den n8n-Workflow oder die konkrete Execution auf.
+ * Kombiniert Metadaten der Nachricht mit der im Kanal hinterlegten Instanz-Basis-URL.
+ */
+data class N8nQuickLinks(
+    val instanceUrl: String?,
+    val workflowUrl: String?,
+    val executionUrl: String?,
+    val primaryUrl: String?,
+    val primaryLabel: String?,
+)
+
+object N8nLinkHelper {
+    fun cleanBaseUrl(raw: String?): String? {
+        val trimmed = raw?.trim()?.trimEnd('/') ?: return null
+        if (!(trimmed.startsWith("https://") || trimmed.startsWith("http://"))) return null
+        val parsed = runCatching { URI(trimmed) }.getOrNull() ?: return null
+        val host = parsed.host ?: return null
+        val portPart = if (parsed.port > 0) ":${parsed.port}" else ""
+        val pathPart = (parsed.rawPath ?: "").trimEnd('/')
+        return "${parsed.scheme.lowercase()}://$host$portPart$pathPart"
+    }
+
+    fun resolve(msg: MessageDto, fallbackInstanceUrl: String? = null): N8nQuickLinks {
+        val base = cleanBaseUrl(msg.metadata.instanceUrl ?: fallbackInstanceUrl)
+        val wfId = msg.metadata.n8nWorkflowId?.trim()?.takeIf { it.isNotEmpty() }
+        val execId = msg.metadata.executionId?.trim()?.takeIf { it.isNotEmpty() }
+        val explicitUrl = msg.metadata.n8nUrl?.trim()?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+
+        val execUrl = when {
+            base != null && wfId != null && execId != null -> "$base/workflow/$wfId/executions/$execId"
+            base != null && execId != null -> "$base/executions/$execId"
+            else -> null
+        }
+        val wfUrl = if (base != null && wfId != null) "$base/workflow/$wfId" else null
+
+        val primaryUrl: String?
+        val primaryLabel: String?
+        when {
+            execUrl != null -> {
+                primaryUrl = execUrl
+                val shortId = if (execId != null && execId.length <= 8) " #$execId" else ""
+                primaryLabel = "Execution$shortId"
+            }
+            wfUrl != null -> {
+                primaryUrl = wfUrl
+                primaryLabel = "Workflow in n8n"
+            }
+            explicitUrl != null -> {
+                primaryUrl = explicitUrl
+                primaryLabel = "In n8n öffnen"
+            }
+            base != null -> {
+                primaryUrl = base
+                primaryLabel = "Instanz öffnen"
+            }
+            else -> {
+                primaryUrl = null
+                primaryLabel = null
+            }
+        }
+
+        return N8nQuickLinks(
+            instanceUrl = base,
+            workflowUrl = wfUrl,
+            executionUrl = execUrl,
+            primaryUrl = primaryUrl,
+            primaryLabel = primaryLabel,
+        )
     }
 }

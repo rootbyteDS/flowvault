@@ -3,6 +3,7 @@ package de.flown8tive.flowvault.notify.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.AnimatedVisibility
@@ -95,6 +96,7 @@ import de.flown8tive.flowvault.notify.model.DiagnosisDto
 import de.flown8tive.flowvault.notify.model.GoldenCircleCopy
 import de.flown8tive.flowvault.notify.model.MessageCategoryHelper
 import de.flown8tive.flowvault.notify.model.MessageDto
+import de.flown8tive.flowvault.notify.model.N8nLinkHelper
 import de.flown8tive.flowvault.notify.model.RollbackChallengeDto
 import de.flown8tive.flowvault.notify.ui.theme.FvColors
 import de.flown8tive.flowvault.notify.ui.theme.parseHexColor
@@ -228,6 +230,7 @@ fun ChatScreen(
                             allowRollback = allowRollback,
                             rollbackBusy = rollbackBusy,
                             rollbackVersionNumber = rollbackVerNum,
+                            channelInstanceUrl = channel?.instanceUrl,
                             showInstance = instanceId == null,
                             onOpenSheet = { selectedDetail = item },
                             onToggleUnread = { vm.setMessageUnread(msg.seq, msg.instance.id, !item.unread) },
@@ -331,6 +334,12 @@ fun ChatScreen(
                         }
                     }
 
+                    if (!channel?.instanceUrl.isNullOrBlank()) {
+                        IconButton(onClick = { openExternalUrl(context, channel?.instanceUrl) }) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "n8n-Instanz öffnen", tint = FvColors.AccentHi)
+                        }
+                    }
+
                     IconButton(onClick = { channelMenuOpen = true }) {
                         Icon(Icons.Default.MoreHoriz, contentDescription = "Kanal-Aktionen", tint = FvColors.Text)
                     }
@@ -352,6 +361,20 @@ fun ChatScreen(
         ) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
+                if (!channel?.instanceUrl.isNullOrBlank()) {
+                    TextButton(
+                        onClick = {
+                            val url = channel?.instanceUrl
+                            channelMenuOpen = false
+                            openExternalUrl(context, url)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = FvColors.AccentHi, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Direkt in n8n-Instanz öffnen", color = FvColors.AccentHi)
+                    }
+                }
                 TextButton(onClick = { vm.refresh(); channelMenuOpen = false }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -382,6 +405,7 @@ fun ChatScreen(
         val liveItem = messages.firstOrNull { it.dto.seq == item.dto.seq } ?: item
         MessageDetailBottomSheet(
             item = liveItem,
+            channelInstanceUrl = channel?.instanceUrl,
             analyzingSeqs = analyzingSeqs,
             allowRollback = allowRollback,
             serverUrl = vm.prefs.serverUrl,
@@ -464,6 +488,7 @@ internal fun RollbackBottomSheet(
 @Composable
 internal fun MessageDetailBottomSheet(
     item: UiChatMessage,
+    channelInstanceUrl: String?,
     analyzingSeqs: Set<Long>,
     allowRollback: Boolean,
     serverUrl: String?,
@@ -478,6 +503,7 @@ internal fun MessageDetailBottomSheet(
     val isUnread = item.unread
     val rollbackVerId = msg.metadata.rollback?.versionId ?: liveDiag?.rollbackVersionId
     val rollbackVerNum = msg.metadata.rollback?.number ?: liveDiag?.rollbackVersionNumber
+    val n8nLinks = remember(msg, channelInstanceUrl) { N8nLinkHelper.resolve(msg, channelInstanceUrl) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -559,10 +585,31 @@ internal fun MessageDetailBottomSheet(
                     label = { Text("Kopieren") },
                     leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp)) },
                 )
+                if (n8nLinks.executionUrl != null) {
+                    AssistChip(
+                        onClick = { openExternalUrl(context, n8nLinks.executionUrl) },
+                        label = { Text("Execution in n8n") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp), tint = FvColors.AccentHi) },
+                    )
+                }
+                if (n8nLinks.workflowUrl != null) {
+                    AssistChip(
+                        onClick = { openExternalUrl(context, n8nLinks.workflowUrl) },
+                        label = { Text("Workflow in n8n") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                }
+                if (n8nLinks.instanceUrl != null) {
+                    AssistChip(
+                        onClick = { openExternalUrl(context, n8nLinks.instanceUrl) },
+                        label = { Text("n8n-Instanz") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    )
+                }
                 if (!msg.metadata.webPath.isNullOrBlank()) {
                     AssistChip(
                         onClick = { openInWeb(context, serverUrl, msg.metadata.webPath) },
-                        label = { Text("In FlowVault öffnen") },
+                        label = { Text("In FlowVault") },
                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp)) },
                     )
                 }
@@ -582,6 +629,7 @@ internal fun SwipeableMessageCard(
     allowRollback: Boolean,
     rollbackBusy: Boolean,
     rollbackVersionNumber: Int?,
+    channelInstanceUrl: String?,
     showInstance: Boolean,
     onOpenSheet: () -> Unit,
     onToggleUnread: () -> Unit,
@@ -637,6 +685,7 @@ internal fun SwipeableMessageCard(
                 allowRollback = allowRollback,
                 rollbackBusy = rollbackBusy,
                 rollbackVersionNumber = rollbackVersionNumber,
+                channelInstanceUrl = channelInstanceUrl,
                 showInstance = showInstance,
                 onOpenSheet = onOpenSheet,
                 onToggleUnread = onToggleUnread,
@@ -660,6 +709,7 @@ internal fun GoldenCircleMessengerCard(
     allowRollback: Boolean,
     rollbackBusy: Boolean,
     rollbackVersionNumber: Int?,
+    channelInstanceUrl: String?,
     showInstance: Boolean,
     onOpenSheet: () -> Unit,
     onToggleUnread: () -> Unit,
@@ -669,7 +719,9 @@ internal fun GoldenCircleMessengerCard(
     onDismissAlert: () -> Unit,
     onMuteWorkflow: () -> Unit,
 ) {
+    val context = LocalContext.current
     val framing = remember(msg) { GoldenCircleCopy.frame(msg) }
+    val n8nLinks = remember(msg, channelInstanceUrl) { N8nLinkHelper.resolve(msg, channelInstanceUrl) }
     var showRawWhat by remember { mutableStateOf(false) }
 
     val stripeColor: Color = when {
@@ -797,6 +849,25 @@ internal fun GoldenCircleMessengerCard(
                         )
                     }
                 }
+                if (n8nLinks.primaryUrl != null && n8nLinks.primaryLabel != null) {
+                    TextButton(
+                        onClick = { openExternalUrl(context, n8nLinks.primaryUrl) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = FvColors.Info,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            n8nLinks.primaryLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = FvColors.Info,
+                        )
+                    }
+                }
                 TextButton(
                     onClick = onToggleUnread,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -908,10 +979,21 @@ internal fun DiagnosisBox(diag: DiagnosisDto) {
     }
 }
 
+internal fun openExternalUrl(context: Context, url: String?) {
+    val clean = url?.trim().orEmpty()
+    if (!(clean.startsWith("https://") || clean.startsWith("http://"))) return
+    val uri = runCatching { Uri.parse(clean) }.getOrNull() ?: return
+    runCatching {
+        CustomTabsIntent.Builder().build().launchUrl(context, uri)
+    }.onFailure {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+}
+
 internal fun openInWeb(context: Context, serverUrl: String?, webPath: String?) {
     if (serverUrl.isNullOrBlank() || webPath.isNullOrBlank()) return
     val fullUrl = "${serverUrl.trimEnd('/')}/${webPath.trimStart('/')}"
-    runCatching {
-        CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(fullUrl))
-    }
+    openExternalUrl(context, fullUrl)
 }

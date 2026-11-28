@@ -10,7 +10,9 @@ import { HttpError } from '../../shared/i18n/server.ts';
 import { canonicalRollbackPayload, validateEcPublicKeySpki, verifyDeviceSignature } from '../../shared/mobile-crypto.ts';
 import { redactText } from '../../shared/redact.ts';
 import {
+  buildN8nUrl,
   categoryOfKind,
+  cleanInstanceUrl,
   type NotifyBootstrap,
   type NotifyCategory,
   type NotifyChannel,
@@ -207,6 +209,23 @@ export function publicDevice(d: DeviceRecord): NotifyDevice {
 }
 
 function toMessage(r: MessageRow): NotifyMessage {
+  const meta: NotifyMessageMetadata = r.metadata ? (JSON.parse(r.metadata) as NotifyMessageMetadata) : {};
+  // Rückwärtskompatible Extraktion für bereits gespeicherte Fehlläufe aus event_uid / group_key
+  if (!meta.executionId && r.event_uid) {
+    const m = /^health:exec:\d+:([^:]+)$/.exec(r.event_uid);
+    if (m?.[1]) meta.executionId = m[1];
+  }
+  if (!meta.n8nWorkflowId && r.group_key) {
+    const m = /^exec:\d+:([^:]+):/.exec(r.group_key);
+    if (m?.[1]) meta.n8nWorkflowId = m[1];
+  }
+  if (!meta.n8nUrl && meta.instanceUrl) {
+    meta.n8nUrl = buildN8nUrl({
+      instanceUrl: meta.instanceUrl,
+      n8nWorkflowId: meta.n8nWorkflowId,
+      executionId: meta.executionId,
+    });
+  }
   return {
     seq: r.seq,
     updatedSeq: r.updated_seq,
@@ -220,7 +239,7 @@ function toMessage(r: MessageRow): NotifyMessage {
     body: r.body,
     groupCount: r.group_count,
     resolvedBySeq: r.resolved_by_seq,
-    metadata: r.metadata ? (JSON.parse(r.metadata) as NotifyMessageMetadata) : {},
+    metadata: meta,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -228,7 +247,7 @@ function toMessage(r: MessageRow): NotifyMessage {
 
 export function redactMessage(msg: NotifyMessage, mode: RedactionMode): NotifyMessage {
   if (mode !== 'full') return msg;
-  const meta: NotifyMessageMetadata = { ...msg.metadata };
+  const meta: NotifyMessageMetadata = { ...msg.metadata, instanceUrl: null, n8nUrl: null };
   if (meta.errorMessage) meta.errorMessage = redactText(meta.errorMessage, 300);
   if (meta.errorNode) meta.errorNode = redactText(meta.errorNode, 120);
   if (meta.failingNodes) {
@@ -1119,17 +1138,34 @@ export function createStore(db: DatabaseSync) {
           )
           .get(device.id, inst.id, readSeq) as { n: number };
         const rule = rules.find((r) => r.scopeType === 'instance' && r.scopeId === inst.id);
+        const instUrl = device.redactionMode === 'full' ? null : cleanInstanceUrl(inst.base_url);
+        let lastMsg = lastRow ? toMessage(lastRow) : null;
+        if (lastMsg && instUrl && !lastMsg.metadata.instanceUrl) {
+          lastMsg = {
+            ...lastMsg,
+            metadata: {
+              ...lastMsg.metadata,
+              instanceUrl: instUrl,
+              n8nUrl: lastMsg.metadata.n8nUrl ?? buildN8nUrl({
+                instanceUrl: instUrl,
+                n8nWorkflowId: lastMsg.metadata.n8nWorkflowId,
+                executionId: lastMsg.metadata.executionId,
+              }),
+            },
+          };
+        }
         return {
           instanceId: inst.id,
           name: device.redactionMode === 'full' ? (redactText(inst.name, 120) ?? inst.name) : inst.name,
           color: inst.color || '#ea4b71',
+          instanceUrl: instUrl,
           enabled: !!inst.enabled,
           lastSyncOk: inst.last_sync_ok === null ? null : !!inst.last_sync_ok,
           openAlerts: alertCount.get(inst.id) ?? 0,
           unreadCount,
           readSeq,
           mutedUntil: rule?.mutedUntil ?? null,
-          lastMessage: lastRow ? redactMessage(toMessage(lastRow), device.redactionMode) : null,
+          lastMessage: lastMsg ? redactMessage(lastMsg, device.redactionMode) : null,
         };
       });
 

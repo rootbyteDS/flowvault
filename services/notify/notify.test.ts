@@ -20,14 +20,16 @@ import {
   verifyDeviceSignature,
 } from '../../shared/mobile-crypto.ts';
 import type { CoreClient } from './core.ts';
-import type {
-  DiagnosisResponse,
-  DiagnosisResult,
-  NotifyBootstrap,
-  NotifyMessage,
-  NotifyPairedResponse,
-  NotifyPairingCreated,
-  RollbackChallenge,
+import {
+  buildN8nUrl,
+  cleanInstanceUrl,
+  type DiagnosisResponse,
+  type DiagnosisResult,
+  type NotifyBootstrap,
+  type NotifyMessage,
+  type NotifyPairedResponse,
+  type NotifyPairingCreated,
+  type RollbackChallenge,
 } from '../../shared/notify.ts';
 
 const SERVICE_TOKEN = 'core-to-notify-test-token';
@@ -38,8 +40,18 @@ const pushLog: { endpoint: string; seq: number }[] = [];
 const fakeCore: CoreClient = {
   async instances() {
     return [
-      { id: 1, name: 'Produktion https://n8n.example.com/?api_key=CAN1secret', color: '#ea4b71', enabled: 1, sync_interval: 15, last_sync_at: Date.now(), last_sync_ok: 1, last_sync_error: null },
-      { id: 2, name: 'Staging', color: '#4cc38a', enabled: 1, sync_interval: 15, last_sync_at: Date.now(), last_sync_ok: 1, last_sync_error: null },
+      {
+        id: 1,
+        name: 'Produktion https://n8n.example.com/?api_key=CAN1secret',
+        base_url: 'https://admin:CAN1secret@n8n.example.com:5678/?api_key=CAN1secret',
+        color: '#ea4b71',
+        enabled: 1,
+        sync_interval: 15,
+        last_sync_at: Date.now(),
+        last_sync_ok: 1,
+        last_sync_error: null,
+      },
+      { id: 2, name: 'Staging', base_url: 'https://n8n-staging.example.com/', color: '#4cc38a', enabled: 1, sync_interval: 15, last_sync_at: Date.now(), last_sync_ok: 1, last_sync_error: null },
     ];
   },
   async openAlerts() {
@@ -556,4 +568,52 @@ test('E2E encrypted failure diagnosis and cryptographically signed biometric rol
     401,
   );
 });
+
+test('n8n quick-links sanitize instance URLs, build execution deep-links, and backfill legacy execution IDs', async () => {
+  assert.equal(cleanInstanceUrl('https://user:pass@n8n.example.com:5678/sub/?token=secret'), 'https://n8n.example.com:5678/sub');
+  assert.equal(cleanInstanceUrl('javascript:alert(1)'), null);
+  assert.equal(
+    buildN8nUrl({ instanceUrl: 'https://n8n.example.com/', n8nWorkflowId: 'wf_42', executionId: '9876' }),
+    'https://n8n.example.com/workflow/wf_42/executions/9876',
+  );
+  assert.equal(
+    buildN8nUrl({ instanceUrl: 'https://n8n.example.com/', n8nWorkflowId: 'wf_42' }),
+    'https://n8n.example.com/workflow/wf_42',
+  );
+
+  const pairRes = await admin('/pair', {
+    method: 'POST',
+    body: JSON.stringify({ label: 'QuickLink Phone', instances: [1], redactionMode: 'lockscreen' }),
+  });
+  const pair = (await pairRes.json()) as NotifyPairingCreated;
+  const dev = (await (await fetch(`${base}/mobile/v1/pair`, {
+    method: 'POST',
+    headers: { 'X-Internal-Token': SERVICE_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: pair.code, deviceName: 'Pixel' }),
+  })).json()) as NotifyPairedResponse;
+
+  // Legacy-Fehllauf ohne explizite metadata.executionId → wird rückwirkend aus eventUid & groupKey extrahiert
+  const ing = (await (await ingest({
+    eventUid: 'health:exec:1:5544',
+    groupKey: 'exec:1:wf_legacy:HTTP Request:502 Bad Gateway',
+    instanceId: 1,
+    instanceName: 'Produktion',
+    workflowId: 10,
+    workflowName: 'Daily KPI',
+    kind: 'execution_failed',
+    title: 'Fehllauf: Daily KPI',
+    body: 'HTTP Request: 502 Bad Gateway',
+  })).json()) as { seq: number };
+
+  const boot = (await (await mobile('/bootstrap', dev.token)).json()) as NotifyBootstrap;
+  assert.equal(boot.channels[0]!.instanceUrl, 'https://n8n.example.com:5678');
+  assert.equal(boot.channels[0]!.lastMessage?.seq, ing.seq);
+  assert.equal(boot.channels[0]!.lastMessage?.metadata.executionId, '5544');
+  assert.equal(boot.channels[0]!.lastMessage?.metadata.n8nWorkflowId, 'wf_legacy');
+  assert.equal(
+    boot.channels[0]!.lastMessage?.metadata.n8nUrl,
+    'https://n8n.example.com:5678/workflow/wf_legacy/executions/5544',
+  );
+});
+
 

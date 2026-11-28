@@ -202,6 +202,8 @@ export function createApp(opts: {
 
   app.get('/mobile/v1/stream', (req, res) => {
     const device = res.locals.device as DeviceRecord;
+    req.setTimeout(0);
+    res.setTimeout(0);
     req.socket.setNoDelay(true);
     req.socket.setKeepAlive(true, 20_000);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');

@@ -9,6 +9,7 @@ import { db, getSettings } from './db.ts';
 import { core, type CoreInstance } from './core.ts';
 import { evaluateInstance } from './evaluate.ts';
 import type { SlimExecution } from '../../shared/executions.ts';
+import { buildN8nUrl, cleanInstanceUrl } from '../../shared/notify.ts';
 import { packError, renderMessage } from '../../shared/i18n/index.ts';
 import { t } from '../../shared/i18n/server.ts';
 
@@ -122,11 +123,15 @@ export async function pollInstance(inst: CoreInstance) {
         severity: 'info',
         title: `Ausführungsabruf wieder aktiv: ${inst.name}`,
         body: 'Ausführungen werden wieder erfolgreich aus n8n geladen.',
-        metadata: { webPath: `/instances/${inst.id}` },
+        metadata: {
+          webPath: `/instances/${inst.id}`,
+          instanceUrl: cleanInstanceUrl(inst.base_url),
+          n8nUrl: cleanInstanceUrl(inst.base_url),
+        },
       });
     }
 
-    const timelines = all.stored || errs.stored ? await evaluateInstance(inst.id, inst.name, color) : [];
+    const timelines = all.stored || errs.stored ? await evaluateInstance(inst.id, inst.name, color, inst.base_url) : [];
 
     // Neue Fehlläufe (nur nach erstem erfolgreichen Poll, damit Erstabruf keine historischen Fehler flutet)
     if (prevPoll.last_success_at !== null && errs.stored > 0) {
@@ -167,6 +172,14 @@ export async function pollInstance(inst: CoreInstance) {
             errorNode: fe.error_node,
             errorMessage: fe.error_message,
             webPath: wf ? `/workflows/${wf.workflowId}` : `/instances/${inst.id}`,
+            instanceUrl: cleanInstanceUrl(inst.base_url),
+            n8nWorkflowId: fe.workflow_n8n_id,
+            executionId: fe.id,
+            n8nUrl: buildN8nUrl({
+              instanceUrl: inst.base_url,
+              n8nWorkflowId: fe.workflow_n8n_id,
+              executionId: fe.id,
+            }),
           },
           createdAt: fe.started_at ?? Date.now(),
         });
@@ -186,7 +199,12 @@ export async function pollInstance(inst: CoreInstance) {
         severity: 'high',
         title: `Ausführungsabruf fehlgeschlagen: ${inst.name}`,
         body: rendered,
-        metadata: { errorMessage: rendered, webPath: `/instances/${inst.id}` },
+        metadata: {
+          errorMessage: rendered,
+          webPath: `/instances/${inst.id}`,
+          instanceUrl: cleanInstanceUrl(inst.base_url),
+          n8nUrl: cleanInstanceUrl(inst.base_url),
+        },
       });
     }
   } finally {

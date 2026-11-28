@@ -35,6 +35,8 @@ function externalOrigin(req: Request): string {
 
 /** Streamt GET /mobile/v1/stream (SSE) direkt vom Notify-Dienst ohne Zwischenpufferung. */
 function proxySse(req: Request, res: Response, key: string) {
+  req.setTimeout(0);
+  res.setTimeout(0);
   req.socket.setNoDelay(true);
   req.socket.setKeepAlive(true, 20_000);
   const target = new URL(`${NOTIFY_URL}/mobile/v1${req.url}`);

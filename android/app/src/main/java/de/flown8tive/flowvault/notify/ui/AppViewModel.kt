@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.sse.EventSource
+import java.util.concurrent.atomic.AtomicLong
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as FlowVaultApp
@@ -57,6 +58,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val unreadMessages: StateFlow<List<MessageEntity>> = repo.unreadMessagesFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val fgStreamGen = AtomicLong(0L)
     private var foregroundStream: EventSource? = null
     private var reconnectJob: Job? = null
 
@@ -324,32 +326,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) return
         val url = prefs.serverUrl ?: return
         val token = app.prefs.deviceToken ?: return
+        val myGen = fgStreamGen.incrementAndGet()
         foregroundStream?.cancel()
-        repo.setConnectionState(ConnectionState.CONNECTING)
+        if (repo.connectionState.value == ConnectionState.OFFLINE) {
+            repo.setConnectionState(ConnectionState.CONNECTING)
+        }
         foregroundStream = repo.api.openStream(
             serverUrl = url,
             token = token,
             afterSeq = prefs.latestSeq,
             onConnected = {
+                if (myGen != fgStreamGen.get()) return@openStream
                 repo.recordHeartbeat()
                 repo.setConnectionState(ConnectionState.LIVE)
             },
-            onHeartbeat = { repo.recordHeartbeat() },
+            onHeartbeat = {
+                if (myGen != fgStreamGen.get()) return@openStream
+                repo.recordHeartbeat()
+                repo.setConnectionState(ConnectionState.LIVE)
+            },
             onMessage = { dto, isNew ->
+                if (myGen != fgStreamGen.get()) return@openStream
                 viewModelScope.launch { repo.handleStreamMessage(dto, isNew) }
             },
             onFailure = {
-                repo.setConnectionState(ConnectionState.OFFLINE)
+                if (myGen != fgStreamGen.get()) return@openStream
                 reconnectJob?.cancel()
                 reconnectJob = viewModelScope.launch {
-                    delay(4_000)
-                    if (prefs.isPaired && prefs.deliveryMode != DeliveryMode.REALTIME_SERVICE) startForegroundStream()
+                    delay(3_000)
+                    if (myGen == fgStreamGen.get() && prefs.isPaired && prefs.deliveryMode != DeliveryMode.REALTIME_SERVICE) {
+                        startForegroundStream()
+                    }
                 }
             },
         )
     }
 
     fun stopForegroundStream() {
+        fgStreamGen.incrementAndGet()
         reconnectJob?.cancel()
         foregroundStream?.cancel()
         foregroundStream = null

@@ -18,6 +18,7 @@ import { safeEqual } from './crypto.ts';
 import { clientFor, getInstance, restoreVersion } from './sync.ts';
 import { diagnoseWorkflowFailure } from './diagnose.ts';
 import { canonicalRollbackPayload, encryptForDevice, verifyDeviceSignature } from '../shared/mobile-crypto.ts';
+import { cleanInstanceUrl } from '../shared/notify.ts';
 import { HttpError, requestT } from '../shared/i18n/server.ts';
 import { packError, renderError } from '../shared/i18n/index.ts';
 
@@ -141,11 +142,17 @@ export const internalRouter = express.Router();
 internalRouter.use(requireToken);
 
 internalRouter.get('/instances', (_req, res) => {
-  res.json(
-    db.prepare(
-      'SELECT id, name, color, enabled, sync_interval, last_sync_at, last_sync_ok, last_sync_error FROM instances ORDER BY id',
-    ).all(),
-  );
+  if (res.locals.mcp) {
+    return void res.json(
+      db.prepare(
+        'SELECT id, name, color, enabled, sync_interval, last_sync_at, last_sync_ok, last_sync_error FROM instances ORDER BY id',
+      ).all(),
+    );
+  }
+  const rows = db.prepare(
+    'SELECT id, name, base_url, color, enabled, sync_interval, last_sync_at, last_sync_ok, last_sync_error FROM instances ORDER BY id',
+  ).all() as (Record<string, unknown> & { base_url: string })[];
+  res.json(rows.map((r) => ({ ...r, base_url: cleanInstanceUrl(r.base_url) })));
 });
 
 const intQuery = (v: unknown, def: number, min: number, max: number) => {

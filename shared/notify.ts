@@ -55,6 +55,35 @@ export function categoryOfKind(kind: NotifyKind): NotifyCategory {
   return 'fails';
 }
 
+/** Bereinigt eine n8n-Basis-URL auf `http(s)://host[:port][/subpath]` ohne Zugangsdaten, Query oder Slash am Ende. */
+export function cleanInstanceUrl(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    const p = u.pathname.replace(/\/+$/, '');
+    return `${u.origin}${p}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Baut den direkten n8n-Sprunglink (Execution → Workflow → Instanz). */
+export function buildN8nUrl(opts: {
+  instanceUrl?: string | null;
+  n8nWorkflowId?: string | null;
+  executionId?: string | null;
+}): string | null {
+  const base = cleanInstanceUrl(opts.instanceUrl);
+  if (!base) return null;
+  const wfId = opts.n8nWorkflowId?.trim();
+  const execId = opts.executionId?.trim();
+  if (wfId && execId) return `${base}/workflow/${encodeURIComponent(wfId)}/executions/${encodeURIComponent(execId)}`;
+  if (wfId) return `${base}/workflow/${encodeURIComponent(wfId)}`;
+  if (execId) return `${base}/executions/${encodeURIComponent(execId)}`;
+  return base;
+}
+
 export interface QuietHours {
   enabled: boolean;
   /** HH:MM im 24h-Format, z. B. "22:00" */
@@ -176,6 +205,14 @@ export interface NotifyMessageMetadata {
   restoredFrom?: number;
   importedCount?: number;
   webPath?: string;
+  /** Bereinigte Basis-URL der n8n-Instanz für Direktsprünge aus der App. */
+  instanceUrl?: string | null;
+  /** Originale Workflow-ID in n8n (für `/workflow/<id>`). */
+  n8nWorkflowId?: string | null;
+  /** Ausführungs-ID in n8n bei Fehlläufen/Regressionen (für `/workflow/<wfId>/executions/<execId>`). */
+  executionId?: string | null;
+  /** Fertig zusammengesetzter n8n-Direktlink (Execution → Workflow → Instanz). */
+  n8nUrl?: string | null;
 }
 
 export interface NotifyMessage {
@@ -210,6 +247,8 @@ export interface NotifyChannel {
   instanceId: number;
   name: string;
   color: string;
+  /** Bereinigte Basis-URL der n8n-Instanz (entfällt bei `redactionMode === 'full'`). */
+  instanceUrl?: string | null;
   enabled: boolean;
   lastSyncOk: boolean | null;
   openAlerts: number;

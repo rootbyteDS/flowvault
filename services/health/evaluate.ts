@@ -3,6 +3,7 @@ import { db, getSettings } from './db.ts';
 import { core, type WorkflowTimeline } from './core.ts';
 import { analyze, type Exec } from './analysis.ts';
 import type { FailingNode, HealthAlert, WorkflowHealth } from '../../shared/executions.ts';
+import { buildN8nUrl, cleanInstanceUrl } from '../../shared/notify.ts';
 
 function loadExecs(instanceId: number, n8nId: string): Exec[] {
   const rows = db
@@ -78,7 +79,12 @@ export function toAlert(r: AlertRow): HealthAlert {
  * - Warnungen für ältere Versionen (z. B. nach Rollback) oder ohne Anstieg → erledigt
  * Eine vom Nutzer ausgeblendete Warnung bleibt ausgeblendet.
  */
-export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string, instanceColor = '#ea4b71') {
+export function evaluateWorkflow(
+  t: WorkflowTimeline,
+  instanceName: string,
+  instanceColor = '#ea4b71',
+  instanceUrl?: string | null,
+) {
   const s = getSettings();
   const result = analyze(t.versions, loadExecs(t.instanceId, t.n8nId), s);
   const latest = result.versions[0];
@@ -125,6 +131,14 @@ export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string, inst
         const basePct = Math.round((latest.baseline?.rate ?? 0) * 100);
         const topNode = latest.failingNodes[0]?.name;
         const rollbackHint = latest.rollback ? ` · Stabile Version: v${latest.rollback.number}` : '';
+        const lastFailedExec = db
+          .prepare(
+            `SELECT id FROM executions
+              WHERE instance_id = ? AND workflow_n8n_id = ? AND status IN ('error', 'crashed')
+              ORDER BY seq DESC LIMIT 1`,
+          )
+          .get(t.instanceId, t.n8nId) as { id: string } | undefined;
+        const execId = lastFailedExec?.id ?? null;
         core.notifyIngest({
           groupKey: `alert:${saved.id}`,
           instanceId: t.instanceId,
@@ -148,6 +162,10 @@ export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string, inst
             rollback: latest.rollback,
             failingNodes: latest.failingNodes.slice(0, 5),
             webPath: `/workflows/${t.workflowId}`,
+            instanceUrl: cleanInstanceUrl(instanceUrl),
+            n8nWorkflowId: t.n8nId,
+            executionId: execId,
+            n8nUrl: buildN8nUrl({ instanceUrl, n8nWorkflowId: t.n8nId, executionId: execId }),
           },
           createdAt: now,
         });
@@ -180,6 +198,9 @@ export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string, inst
         total: latest?.total ?? 0,
         failed: latest?.failed ?? 0,
         webPath: `/workflows/${t.workflowId}`,
+        instanceUrl: cleanInstanceUrl(instanceUrl),
+        n8nWorkflowId: t.n8nId,
+        n8nUrl: buildN8nUrl({ instanceUrl, n8nWorkflowId: t.n8nId }),
       },
       createdAt: now,
     });
@@ -192,7 +213,12 @@ export function evaluateWorkflow(t: WorkflowTimeline, instanceName: string, inst
 }
 
 /** Nach jedem Abruf: alle Workflows der Instanz neu bewerten, die im Betrachtungszeitraum liefen. */
-export async function evaluateInstance(instanceId: number, instanceName: string, instanceColor = '#ea4b71') {
+export async function evaluateInstance(
+  instanceId: number,
+  instanceName: string,
+  instanceColor = '#ea4b71',
+  instanceUrl?: string | null,
+) {
   const since = Date.now() - getSettings().lookbackDays * 864e5;
   const ran = new Set(
     (
@@ -208,7 +234,7 @@ export async function evaluateInstance(instanceId: number, instanceName: string,
   );
   const timelines = await core.instanceTimeline(instanceId);
   for (const t of timelines) {
-    if (ran.has(t.n8nId) || open.has(t.workflowId)) evaluateWorkflow(t, instanceName, instanceColor);
+    if (ran.has(t.n8nId) || open.has(t.workflowId)) evaluateWorkflow(t, instanceName, instanceColor, instanceUrl);
   }
   return timelines;
 }

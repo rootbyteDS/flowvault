@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DoneAll
@@ -188,6 +189,9 @@ fun ChannelsScreen(
                         channel = ch,
                         onClick = { onOpenChannel(ch.instanceId, ch.name) },
                         onLongClick = { contextChannel = ch },
+                        onOpenInstanceWeb = ch.instanceUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                            { openExternalUrl(context, url) }
+                        },
                         onToggleRead = {
                             if (ch.unreadCount > 0) vm.markChannelRead(ch.instanceId)
                             else vm.markChannelUnread(ch.instanceId)
@@ -255,6 +259,20 @@ fun ChannelsScreen(
                     color = FvColors.Muted,
                 )
                 Spacer(Modifier.height(4.dp))
+                if (!ch.instanceUrl.isNullOrBlank()) {
+                    OutlinedButton(
+                        onClick = {
+                            val url = ch.instanceUrl
+                            contextChannel = null
+                            openExternalUrl(context, url)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = FvColors.AccentHi, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Direkt in n8n-Instanz öffnen", color = FvColors.AccentHi)
+                    }
+                }
                 if (ch.unreadCount > 0) {
                     Button(
                         onClick = { vm.markChannelRead(ch.instanceId); contextChannel = null },
@@ -441,6 +459,7 @@ private fun SwipeableChannelRow(
     channel: ChannelEntity,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onOpenInstanceWeb: (() -> Unit)?,
     onToggleRead: () -> Unit,
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
@@ -481,7 +500,12 @@ private fun SwipeableChannelRow(
         },
         content = {
             Box(Modifier.background(FvColors.Bg)) {
-                ChannelRow(channel = channel, onClick = onClick, onLongClick = onLongClick)
+                ChannelRow(
+                    channel = channel,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                    onOpenInstanceWeb = onOpenInstanceWeb,
+                )
             }
         },
     )
@@ -493,6 +517,7 @@ private fun ChannelRow(
     channel: ChannelEntity,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onOpenInstanceWeb: (() -> Unit)?,
 ) {
     val avatarColor = parseHexColor(channel.color)
     val muted = channel.mutedUntil != null && (channel.mutedUntil == -1L || channel.mutedUntil > System.currentTimeMillis())
@@ -586,6 +611,18 @@ private fun ChannelRow(
                         )
                     }
                 }
+            }
+        }
+
+        if (onOpenInstanceWeb != null) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onOpenInstanceWeb, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.OpenInNew,
+                    contentDescription = "n8n-Instanz öffnen",
+                    tint = FvColors.Dim,
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
     }

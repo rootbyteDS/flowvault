@@ -13,6 +13,7 @@ import de.flown8tive.flowvault.notify.model.InstanceRefDto
 import de.flown8tive.flowvault.notify.model.MessageCategoryHelper
 import de.flown8tive.flowvault.notify.model.MessageDto
 import de.flown8tive.flowvault.notify.model.MessageMetadataDto
+import de.flown8tive.flowvault.notify.model.N8nLinkHelper
 import de.flown8tive.flowvault.notify.model.PairingUriParser
 import de.flown8tive.flowvault.notify.model.RollbackHintDto
 import de.flown8tive.flowvault.notify.model.VersionRefDto
@@ -236,5 +237,35 @@ class NotifyUnitTest {
         assertEquals("focus", critical.openTabTarget)
         assertTrue(critical.showMarkAllRead)
         assertEquals(WidgetTone.CRITICAL, critical.rows.first().tone)
+    }
+
+    @Test
+    fun n8nLinkHelperResolvesExecutionWorkflowAndInstanceLinksCleanly() {
+        val execMsg = MessageDto(
+            seq = 91,
+            instance = InstanceRefDto(1, "Produktion"),
+            workflow = WorkflowRefDto(19, "Billing"),
+            kind = "execution_failed",
+            severity = "high",
+            title = "Fehllauf",
+            body = "HTTP 502",
+            metadata = MessageMetadataDto(
+                n8nWorkflowId = "wf_abc",
+                executionId = "4812",
+            ),
+            createdAt = 1_764_097_200_000L,
+        )
+        val links = N8nLinkHelper.resolve(execMsg, fallbackInstanceUrl = "https://user:secret@n8n.example.com:5678/?foo=bar/")
+        assertEquals("https://n8n.example.com:5678", links.instanceUrl)
+        assertEquals("https://n8n.example.com:5678/workflow/wf_abc", links.workflowUrl)
+        assertEquals("https://n8n.example.com:5678/workflow/wf_abc/executions/4812", links.executionUrl)
+        assertEquals("https://n8n.example.com:5678/workflow/wf_abc/executions/4812", links.primaryUrl)
+        assertEquals("Execution #4812", links.primaryLabel)
+
+        val wfOnly = execMsg.copy(metadata = MessageMetadataDto(n8nWorkflowId = "wf_abc"))
+        val wfLinks = N8nLinkHelper.resolve(wfOnly, fallbackInstanceUrl = "https://n8n.example.com/")
+        assertNull(wfLinks.executionUrl)
+        assertEquals("https://n8n.example.com/workflow/wf_abc", wfLinks.primaryUrl)
+        assertEquals("Workflow in n8n", wfLinks.primaryLabel)
     }
 }

@@ -45,9 +45,9 @@ class FlowVaultApi {
 
     private val sseClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        // Server sendet alle 20 s ein `ping`-Event -> nach 45 s Funkstille gilt die Leitung als tot und baut neu auf!
-        .readTimeout(45, TimeUnit.SECONDS)
-        .pingInterval(20, TimeUnit.SECONDS)
+        // Server sendet alle 20 s ein `ping`-Event -> 75 s Puffer verhindert Fehlalarme bei Mobilfunk/Proxys
+        // und vermeidet HTTP/2-PING-Abbrüche durch Reverse-Proxys (Nginx, Caddy, Cloudflare, Traefik).
+        .readTimeout(75, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .followRedirects(false)
         .build()

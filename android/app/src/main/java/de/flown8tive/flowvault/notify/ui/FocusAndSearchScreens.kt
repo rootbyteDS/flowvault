@@ -72,11 +72,13 @@ fun FocusScreen(
     onOpenChannel: (Int, String) -> Unit,
 ) {
     val context = LocalContext.current
+    val channels by vm.channels.collectAsState()
     val openAlerts by vm.openAlerts.collectAsState()
     val unreadMessages by vm.unreadMessages.collectAsState()
     val allowRollback by vm.allowRollback.collectAsState()
     val analyzingSeqs by vm.analyzingSeqs.collectAsState()
     val rollbackBusy by vm.rollbackBusy.collectAsState()
+    val urlByInst = remember(channels) { channels.associate { it.instanceId to it.instanceUrl } }
 
     var filter by remember { mutableStateOf(FocusFilter.ALL) }
     var selectedDetail by remember { mutableStateOf<UiChatMessage?>(null) }
@@ -144,6 +146,7 @@ fun FocusScreen(
                         allowRollback = allowRollback,
                         rollbackBusy = rollbackBusy,
                         rollbackVersionNumber = rollbackVerNum,
+                        channelInstanceUrl = urlByInst[msg.instance.id],
                         showInstance = true,
                         onOpenSheet = { selectedDetail = item },
                         onToggleUnread = { vm.setMessageUnread(msg.seq, msg.instance.id, !item.unread) },
@@ -214,6 +217,7 @@ fun FocusScreen(
         val liveItem = combined.firstOrNull { it.dto.seq == item.dto.seq } ?: item
         MessageDetailBottomSheet(
             item = liveItem,
+            channelInstanceUrl = urlByInst[liveItem.dto.instance.id],
             analyzingSeqs = analyzingSeqs,
             allowRollback = allowRollback,
             serverUrl = vm.prefs.serverUrl,

@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import de.flown8tive.flowvault.notify.model.ChannelDto
 import de.flown8tive.flowvault.notify.model.DiagnosisDto
 import de.flown8tive.flowvault.notify.model.FlowVaultJson
@@ -26,6 +28,7 @@ data class ChannelEntity(
     @PrimaryKey val instanceId: Int,
     val name: String,
     val color: String,
+    val instanceUrl: String? = null,
     val enabled: Boolean,
     val lastSyncOk: Boolean?,
     val openAlerts: Int,
@@ -112,6 +115,7 @@ fun ChannelDto.toEntity(): ChannelEntity = ChannelEntity(
     instanceId = instanceId,
     name = name,
     color = color,
+    instanceUrl = instanceUrl,
     enabled = enabled,
     lastSyncOk = lastSyncOk,
     openAlerts = openAlerts,
@@ -211,11 +215,17 @@ interface NotifyDao {
     suspend fun clearMessages()
 }
 
-@Database(entities = [ChannelEntity::class, MessageEntity::class], version = 3, exportSchema = false)
+@Database(entities = [ChannelEntity::class, MessageEntity::class], version = 4, exportSchema = false)
 abstract class FlowVaultDatabase : RoomDatabase() {
     abstract fun dao(): NotifyDao
 
     companion object {
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE channels ADD COLUMN instanceUrl TEXT")
+            }
+        }
+
         @Volatile
         private var instance: FlowVaultDatabase? = null
 
@@ -225,7 +235,7 @@ abstract class FlowVaultDatabase : RoomDatabase() {
                     context.applicationContext,
                     FlowVaultDatabase::class.java,
                     "flowvault_notify.db",
-                ).fallbackToDestructiveMigration().build().also { instance = it }
+                ).addMigrations(MIGRATION_3_4).fallbackToDestructiveMigration().build().also { instance = it }
             }
     }
 }

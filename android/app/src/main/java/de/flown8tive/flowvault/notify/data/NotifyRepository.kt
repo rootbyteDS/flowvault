@@ -195,6 +195,7 @@ class NotifyRepository(
             instanceId = msg.instance.id,
             name = msg.instance.name,
             color = msg.instance.color,
+            instanceUrl = msg.metadata.instanceUrl,
             enabled = true,
             lastSyncOk = true,
             openAlerts = 0,
@@ -208,6 +209,7 @@ class NotifyRepository(
         )).copy(
             name = msg.instance.name,
             color = msg.instance.color,
+            instanceUrl = msg.metadata.instanceUrl ?: existing?.instanceUrl,
             openAlerts = ((existing?.openAlerts ?: 0) + alertDelta).coerceAtLeast(0),
             unreadCount = (existing?.unreadCount ?: 0) + unreadInc,
             lastMessageTitle = msg.title,

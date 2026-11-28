@@ -51,6 +51,7 @@ async function get<T>(p: string): Promise<T> {
 export interface CoreInstance {
   id: number;
   name: string;
+  base_url?: string | null;
   color?: string;
   enabled: number;
 }

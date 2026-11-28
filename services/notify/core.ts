@@ -9,6 +9,7 @@ import type { DiagnosisResponse, RollbackExecuteResult } from '../../shared/noti
 export interface CoreInstanceMeta {
   id: number;
   name: string;
+  base_url?: string | null;
   color: string;
   enabled: number;
   sync_interval: number;
