@@ -207,6 +207,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun markAllRead() {
+        viewModelScope.launch {
+            runCatching { repo.markAllRead() }
+                .onSuccess { _bannerMessage.value = "Alle Meldungen als gelesen markiert" }
+        }
+    }
+
     fun markChannelUnread(instanceId: Int) {
         viewModelScope.launch {
             runCatching { repo.markChannelUnread(instanceId) }

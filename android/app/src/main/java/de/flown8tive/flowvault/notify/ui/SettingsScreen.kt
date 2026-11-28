@@ -14,29 +14,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -58,13 +54,17 @@ import de.flown8tive.flowvault.notify.data.ConnectionState
 import de.flown8tive.flowvault.notify.model.DeliveryMode
 import de.flown8tive.flowvault.notify.push.UnifiedPushManager
 import de.flown8tive.flowvault.notify.ui.theme.FvColors
+import de.flown8tive.flowvault.notify.widget.FlowVaultWidgetUpdater
 import java.util.TimeZone
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Einhand-Schutz & Einstellungen (Tab 4 in der unteren Daumen-Leiste):
+ * Kein oberer Zurück-Button nötig; primäre Schnellaktionen („Neu verbinden“, „Echtzeit-Test“)
+ * kleben dauerhaft unten direkt über der Daumen-Navigation.
+ */
 @Composable
 fun SettingsScreen(
     vm: AppViewModel,
-    onBack: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -89,32 +89,28 @@ fun SettingsScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(
-        containerColor = FvColors.Bg,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = FvColors.Sidebar),
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück", tint = FvColors.Text)
-                    }
-                },
-                title = { Text("Schutz & Einstellungen", fontWeight = FontWeight.SemiBold, color = FvColors.Text) },
-            )
-        },
-    ) { padding ->
+    Column(modifier = Modifier.fillMaxSize().background(FvColors.Bg)) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+                .weight(1f)
+                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // ─── 1. GOLDEN CIRCLE: WHY & HOW – Echtzeit-Freigaben-Checkliste ───
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Schutz, Widgets & Freigaben", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = FvColors.Text)
+                Text(
+                    "Alle Schalter für zuverlässigen Echtzeit-Empfang und den Startbildschirm.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = FvColors.Muted,
+                )
+            }
+
+            // ─── 1. Echtzeit-Freigaben-Checkliste ───
             SettingsCard(
                 title = "Echtzeit-Zuverlässigkeit & Freigaben",
-                whySubtitle = "Damit dich Ausfälle auch bei gesperrtem Display und im Mobilfunk ohne Verzögerung erreichen.",
+                whySubtitle = "Damit dich Ausfälle auch bei gesperrtem Display und im Mobilfunk sofort erreichen.",
             ) {
                 PermissionCheckRow(
                     ok = permStatus.notificationsGranted,
@@ -151,25 +147,55 @@ fun SettingsScreen(
                         Text("Letzter Server-Heartbeat: $heartbeatText (Prüfung alle 20 s)", style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { vm.reconnectRealtime() },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Neu verbinden")
+            }
+
+            // ─── 2. Startbildschirm-Widgets (1-Tap Anheften) ───
+            SettingsCard(
+                title = "Android Startbildschirm-Widgets",
+                whySubtitle = "System-Puls auf dem Homescreen sehen, synchronisieren und als gelesen markieren – ohne die App zu öffnen.",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Widgets, contentDescription = null, tint = FvColors.AccentHi, modifier = Modifier.size(20.dp))
+                    Text(
+                        "Wähle zwischen dem großen 4×2 Live-Monitor (mit Ereignis-Liste & Aktionen) oder der kompakten 2×1 System-Puls-Kachel für deine untere Daumen-Reihe.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = FvColors.Muted,
+                    )
+                }
+                if (FlowVaultWidgetUpdater.canRequestPin(context)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                val ok = FlowVaultWidgetUpdater.requestPinMonitorWidget(context)
+                                if (!ok) vm.showBanner("Bitte über langes Tippen auf dem Startbildschirm → Widgets hinzufügen.")
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        ) {
+                            Text("4×2 Monitor anheften", style = MaterialTheme.typography.labelMedium)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val ok = FlowVaultWidgetUpdater.requestPinPulseWidget(context)
+                                if (!ok) vm.showBanner("Bitte über langes Tippen auf dem Startbildschirm → Widgets hinzufügen.")
+                            },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
+                        ) {
+                            Text("2×1 Puls anheften", style = MaterialTheme.typography.labelMedium, color = FvColors.AccentHi)
+                        }
                     }
-                    Button(
-                        onClick = { vm.sendSelfTest() },
-                        enabled = !busy,
-                        colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Echtzeit-Test")
-                    }
+                } else {
+                    Text(
+                        "Tipp: Halte auf deinem Android-Startbildschirm eine freie Stelle gedrückt → „Widgets“ → „FlowVault Notify“.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = FvColors.AccentHi,
+                    )
                 }
             }
 
-            // ─── 2. HOW: Zustellweg & Ruhezeiten ───
+            // ─── 3. Zustellmodus & Ruhezeiten ───
             SettingsCard(
                 title = "Zustellmodus",
                 whySubtitle = "Wie dein Handy im Hintergrund mit FlowVault verbunden bleibt.",
@@ -253,13 +279,14 @@ fun SettingsScreen(
                 }
                 Button(
                     onClick = { vm.saveQuietHours(quietHours) },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
                 ) {
                     Text("Ruhezeiten speichern")
                 }
             }
 
-            // ─── 3. WHAT: Privatsphäre, Kryptografie & Technische Gerätedaten ───
+            // ─── 4. Sicherheit & Technische Details ───
             SettingsCard(
                 title = "Sicherheit & Technische Details",
                 whySubtitle = "Kryptografischer Status dieses Geräts.",
@@ -300,6 +327,32 @@ fun SettingsScreen(
                 }
             }
         }
+
+        // ─── Feste untere Daumen-Aktionsleiste ───
+        HorizontalDivider(color = FvColors.Line2)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(FvColors.Panel)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { vm.reconnectRealtime() },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Neu verbinden")
+            }
+            Button(
+                onClick = { vm.sendSelfTest() },
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
+                modifier = Modifier.weight(1f),
+            ) {
+                Spacer(Modifier.width(2.dp))
+                Text("Echtzeit-Test")
+            }
+        }
     }
 }
 
@@ -331,14 +384,14 @@ private fun PermissionCheckRow(
             Button(
                 onClick = onAction,
                 colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
             ) {
                 Text(actionLabel, style = MaterialTheme.typography.labelSmall)
             }
         } else {
             OutlinedButton(
                 onClick = onAction,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
             ) {
                 Text(actionLabel, style = MaterialTheme.typography.labelSmall)
             }
@@ -372,7 +425,7 @@ private fun DeliveryOption(selected: Boolean, title: String, subtitle: String, o
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onClick)

@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <!-- 1. WHY: Golden Circle System-Puls -->
+    <LinearLayout
+        android:id="@+id/widget_status_box"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/widget_header_calm"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:id="@+id/widget_status_dot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:contentDescription="@null"
+            android:src="@drawable/widget_dot_green" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="9dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Alle Systeme ruhig"
+                android:textColor="#EFE9DF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Echtzeit-Schutz aktiv"
+                android:textColor="#A3A8B2"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_conn_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="LIVE"
+            android:textColor="#4CC38A"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 2. WHAT: Live-Ereignisse / Überwachte Instanzen -->
+    <LinearLayout
+        android:id="@+id/widget_feed_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="7dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_empty_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:padding="6dp"
+            android:text="Keine offenen Störungen – tippe unten auf Sync oder Fokus."
+            android:textColor="#80868F"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/widget_row_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:background="@drawable/widget_row_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="9dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="9dp"
+            android:paddingBottom="5dp">
+
+            <ImageView
+                android:id="@+id/widget_row_1_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:contentDescription="@null"
+                android:src="@drawable/widget_dot_green" />
+
+            <TextView
+                android:id="@+id/widget_row_1_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Instanz"
+                android:textColor="#EFE9DF"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_row_1_meta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="ruhig"
+                android:textColor="#A3A8B2"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_row_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:background="@drawable/widget_row_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="9dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="9dp"
+            android:paddingBottom="5dp">
+
+            <ImageView
+                android:id="@+id/widget_row_2_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:contentDescription="@null"
+                android:src="@drawable/widget_dot_green" />
+
+            <TextView
+                android:id="@+id/widget_row_2_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Instanz"
+                android:textColor="#EFE9DF"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_row_2_meta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="ruhig"
+                android:textColor="#A3A8B2"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_row_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_row_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="9dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="9dp"
+            android:paddingBottom="5dp">
+
+            <ImageView
+                android:id="@+id/widget_row_3_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:contentDescription="@null"
+                android:src="@drawable/widget_dot_green" />
+
+            <TextView
+                android:id="@+id/widget_row_3_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Instanz"
+                android:textColor="#EFE9DF"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_row_3_meta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="ruhig"
+                android:textColor="#A3A8B2"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 3. HOW: Einhand-Aktionsleiste unten im Widget -->
+    <LinearLayout
+        android:id="@+id/widget_actions_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_btn_open"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/widget_btn_bg"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="Instanzen öffnen"
+            android:textColor="#EFE9DF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_btn_mark_read"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/widget_btn_accent"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="✓✓ Gelesen"
+            android:textColor="#EFE9DF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/widget_btn_sync"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/widget_btn_bg"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:text="↻ Sync"
+            android:textColor="#E39A70"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>

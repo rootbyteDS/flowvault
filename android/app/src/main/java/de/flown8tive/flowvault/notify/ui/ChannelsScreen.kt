@@ -3,6 +3,7 @@ package de.flown8tive.flowvault.notify.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,12 +26,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.MarkChatRead
 import androidx.compose.material.icons.filled.MarkChatUnread
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,14 +43,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -71,7 +69,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import de.flown8tive.flowvault.notify.data.ChannelEntity
 import de.flown8tive.flowvault.notify.data.ConnectionState
-import de.flown8tive.flowvault.notify.data.MessageEntity
 import de.flown8tive.flowvault.notify.model.MessageCategoryHelper
 import de.flown8tive.flowvault.notify.ui.theme.FvColors
 import de.flown8tive.flowvault.notify.ui.theme.parseHexColor
@@ -86,27 +83,31 @@ private enum class ChannelFilter(val label: String) {
     CHANGES("Änderungen"),
 }
 
+/**
+ * Einhand-Startansicht (Thumb-Zone First + Golden Circle):
+ * - Oberes Drittel: Ruhiger Sichtbereich (WHY System-Puls) ohne schwer erreichbare Menüs.
+ *   Drückt die erste Instanz-Kachel ergonomisch in die Daumen-Zone (One-UI-Prinzip).
+ * - Mitte/Unten: Instanz-Liste mit Pull-to-Refresh & beidseitiger Wischgeste (Links ODER Rechts).
+ * - Ganz unten: Filter-Chips, „Alle gelesen“ & Sync direkt über der unteren Daumen-Navigation.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChannelsScreen(
     vm: AppViewModel,
     onOpenChannel: (Int, String) -> Unit,
-    onOpenAlerts: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenFocus: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val channels by vm.channels.collectAsState()
     val openAlerts by vm.openAlerts.collectAsState()
     val connState by vm.connectionState.collectAsState()
+    val busy by vm.busy.collectAsState()
 
     var permStatus by remember { mutableStateOf(PermissionHelper.check(context)) }
     var filter by remember { mutableStateOf(ChannelFilter.ALL) }
-    var searchOpen by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
     var contextChannel by remember { mutableStateOf<ChannelEntity?>(null) }
 
-    // Aktualisiert Freigaben sofort, wenn man aus den Android-Systemeinstellungen zurückkehrt
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -119,10 +120,6 @@ fun ChannelsScreen(
 
     val totalUnread = remember(channels) { channels.sumOf { it.unreadCount } }
 
-    val searchResults by remember(searchQuery) {
-        vm.searchMessages(searchQuery.trim())
-    }.collectAsState(initial = emptyList())
-
     val filtered = remember(channels, filter) {
         channels.filter { ch ->
             when (filter) {
@@ -134,151 +131,112 @@ fun ChannelsScreen(
         }
     }
 
-    Scaffold(
-        containerColor = FvColors.Bg,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = FvColors.Sidebar),
-                title = {
-                    Column {
-                        Text("FlowVault", fontWeight = FontWeight.SemiBold, color = FvColors.Text)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val dot = when (connState) {
-                                ConnectionState.LIVE -> FvColors.Add
-                                ConnectionState.SYNCED -> FvColors.Info
-                                ConnectionState.CONNECTING -> FvColors.Mod
-                                ConnectionState.OFFLINE -> FvColors.Dim
-                            }
-                            val label = when (connState) {
-                                ConnectionState.LIVE -> "Echtzeit-Schutz aktiv"
-                                ConnectionState.SYNCED -> "Synchronisiert"
-                                ConnectionState.CONNECTING -> "Verbinde…"
-                                ConnectionState.OFFLINE -> "Offline – verbinde automatisch"
-                            }
-                            Box(Modifier.size(7.dp).clip(CircleShape).background(dot))
-                            Text(label, style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQuery = "" }) {
-                        Icon(Icons.Default.Search, contentDescription = "Suchen", tint = FvColors.Muted)
-                    }
-                    IconButton(onClick = { vm.refresh() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Aktualisieren", tint = FvColors.Muted)
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Einstellungen & Freigaben", tint = if (permStatus.allOptimal) FvColors.Muted else FvColors.Mod)
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (searchOpen) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Workflows, Nodes oder Fehler suchen…") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-
-            if (searchQuery.isNotBlank()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(searchResults, key = { it.seq }) { msg ->
-                        SearchResultRow(msg) { onOpenChannel(msg.instanceId, msg.instanceName) }
-                    }
+    Column(modifier = Modifier.fillMaxSize().background(FvColors.Bg)) {
+        PullToRefreshBox(
+            isRefreshing = busy,
+            onRefresh = { vm.refresh() },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 12.dp),
+            ) {
+                // ─── 1. GOLDEN CIRCLE WHY: Oberer Sichtbereich (schiebt Liste in Daumen-Reichweite) ───
+                item(key = "one-ui-why-header") {
+                    ReachabilityPulseHeader(
+                        connState = connState,
+                        openAlertsCount = openAlerts.size,
+                        totalUnread = totalUnread,
+                        channelsCount = channels.size,
+                        onOpenFocus = onOpenFocus,
+                    )
                 }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    // ─── 1. GOLDEN CIRCLE: WHY (Systemzustand & Sinn auf den ersten Blick) ───
-                    item(key = "golden-why-hero") {
-                        SystemPulseHero(
-                            openAlertsCount = openAlerts.size,
-                            totalUnread = totalUnread,
-                            channelsCount = channels.size,
-                            onOpenAlerts = onOpenAlerts,
-                            onFilterUnread = { filter = ChannelFilter.UNREAD },
+
+                if (!permStatus.allOptimal) {
+                    item(key = "permission-nudge") {
+                        PermissionNudgeBanner(
+                            status = permStatus,
+                            onFixBattery = { PermissionHelper.requestIgnoreBatteryOptimizations(context) },
+                            onFixNotifications = { PermissionHelper.openNotificationSettings(context) },
                         )
                     }
+                }
 
-                    // Warn-Kachel, falls eine Android-Systemfreigabe den Echtzeit-Schutz ausbremst
-                    if (!permStatus.allOptimal) {
-                        item(key = "permission-banner") {
-                            PermissionNudgeBanner(
-                                status = permStatus,
-                                onFixBattery = { PermissionHelper.requestIgnoreBatteryOptimizations(context) },
-                                onFixNotifications = { PermissionHelper.openNotificationSettings(context) },
+                // ─── 2. WHAT: Überwachte Instanz-Kanäle in bequemer Daumenhöhe ───
+                if (filtered.isEmpty()) {
+                    item(key = "empty") {
+                        Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                if (filter == ChannelFilter.UNREAD) "Alles gelesen – keine offenen Meldungen." else "Keine Instanz-Kanäle in dieser Ansicht.",
+                                color = FvColors.Dim,
                             )
                         }
                     }
-
-                    // ─── 2. GOLDEN CIRCLE: HOW (Fokus wählen & schnell abarbeiten) ───
-                    item(key = "golden-how-filters") {
-                        Column {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                items(ChannelFilter.entries) { item ->
-                                    val chipLabel = if (item == ChannelFilter.UNREAD && totalUnread > 0) {
-                                        "Ungelesen ($totalUnread)"
-                                    } else {
-                                        item.label
-                                    }
-                                    FilterChip(
-                                        selected = filter == item,
-                                        onClick = { filter = item },
-                                        label = { Text(chipLabel) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = FvColors.AccentStrong,
-                                            selectedLabelColor = FvColors.Text,
-                                        ),
-                                    )
-                                }
-                            }
-                            if (filtered.isNotEmpty()) {
-                                Text(
-                                    "Tipp: Nach rechts wischen oder gedrückt halten, um Gelesen/Ungelesen umzuschalten",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = FvColors.Dim,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
-                    }
-
-                    // ─── 3. GOLDEN CIRCLE: WHAT (Die einzelnen Instanz-Kanäle) ───
-                    if (filtered.isEmpty()) {
-                        item(key = "empty") {
-                            Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                                Text(
-                                    if (filter == ChannelFilter.UNREAD) "Alles erledigt – keine ungelesenen Meldungen." else "Keine Instanz-Kanäle in dieser Ansicht.",
-                                    color = FvColors.Dim,
-                                )
-                            }
-                        }
-                    }
-
-                    items(filtered, key = { it.instanceId }) { ch ->
-                        SwipeableChannelRow(
-                            channel = ch,
-                            onClick = { onOpenChannel(ch.instanceId, ch.name) },
-                            onLongClick = { contextChannel = ch },
-                            onToggleRead = {
-                                if (ch.unreadCount > 0) vm.markChannelRead(ch.instanceId)
-                                else vm.markChannelUnread(ch.instanceId)
-                            },
+                } else {
+                    item(key = "gesture-hint") {
+                        Text(
+                            "Links oder rechts wischen = Gelesen/Ungelesen · Gedrückt halten = Optionen",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = FvColors.Dim,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
                         )
-                        HorizontalDivider(color = FvColors.Line, modifier = Modifier.padding(start = 76.dp))
                     }
                 }
+
+                items(filtered, key = { it.instanceId }) { ch ->
+                    SwipeableChannelRow(
+                        channel = ch,
+                        onClick = { onOpenChannel(ch.instanceId, ch.name) },
+                        onLongClick = { contextChannel = ch },
+                        onToggleRead = {
+                            if (ch.unreadCount > 0) vm.markChannelRead(ch.instanceId)
+                            else vm.markChannelUnread(ch.instanceId)
+                        },
+                    )
+                    HorizontalDivider(color = FvColors.Line, modifier = Modifier.padding(start = 76.dp))
+                }
+            }
+        }
+
+        // ─── 3. HOW: Untere Daumen-Steuerleiste (Filter, Alle gelesen, Sync) ───
+        HorizontalDivider(color = FvColors.Line2)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(FvColors.Panel)
+                .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(end = 6.dp),
+            ) {
+                items(ChannelFilter.entries) { item ->
+                    val chipLabel = if (item == ChannelFilter.UNREAD && totalUnread > 0) {
+                        "Ungelesen ($totalUnread)"
+                    } else {
+                        item.label
+                    }
+                    FilterChip(
+                        selected = filter == item,
+                        onClick = { filter = item },
+                        label = { Text(chipLabel, style = MaterialTheme.typography.labelMedium) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = FvColors.AccentStrong,
+                            selectedLabelColor = FvColors.Text,
+                        ),
+                    )
+                }
+            }
+
+            if (totalUnread > 0) {
+                IconButton(onClick = { vm.markAllRead() }) {
+                    Icon(Icons.Default.DoneAll, contentDescription = "Alle als gelesen markieren", tint = FvColors.Add)
+                }
+            }
+            IconButton(onClick = { vm.refresh() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Jetzt synchronisieren", tint = FvColors.Muted)
             }
         }
     }
@@ -289,7 +247,7 @@ fun ChannelsScreen(
             onDismissRequest = { contextChannel = null },
             containerColor = FvColors.Panel,
         ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(ch.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
                 Text(
                     if (ch.unreadCount > 0) "${ch.unreadCount} ungelesene Meldung(en)" else "Alle Meldungen gelesen",
@@ -298,119 +256,136 @@ fun ChannelsScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 if (ch.unreadCount > 0) {
-                    TextButton(onClick = { vm.markChannelRead(ch.instanceId); contextChannel = null }) {
-                        Icon(Icons.Default.MarkChatRead, contentDescription = null, tint = FvColors.Add, modifier = Modifier.size(18.dp))
+                    Button(
+                        onClick = { vm.markChannelRead(ch.instanceId); contextChannel = null },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
+                    ) {
+                        Icon(Icons.Default.MarkChatRead, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Kanal als gelesen markieren", color = FvColors.Text)
+                        Text("Kanal als gelesen markieren")
                     }
                 } else {
-                    TextButton(onClick = { vm.markChannelUnread(ch.instanceId); contextChannel = null }) {
+                    OutlinedButton(
+                        onClick = { vm.markChannelUnread(ch.instanceId); contextChannel = null },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Icon(Icons.Default.MarkChatUnread, contentDescription = null, tint = FvColors.AccentHi, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Als ungelesen markieren (für später)", color = FvColors.AccentHi)
+                        Text("Als ungelesen markieren (Wiedervorlage)", color = FvColors.AccentHi)
                     }
                 }
-                HorizontalDivider(color = FvColors.Line)
+                HorizontalDivider(color = FvColors.Line, modifier = Modifier.padding(vertical = 4.dp))
                 if (isMuted) {
-                    TextButton(onClick = { vm.muteInstance(ch.instanceId, null); contextChannel = null }) {
+                    TextButton(onClick = { vm.muteInstance(ch.instanceId, null); contextChannel = null }, modifier = Modifier.fillMaxWidth()) {
                         Text("Stummschaltung aufheben", color = FvColors.Add)
                     }
                 } else {
-                    TextButton(onClick = { vm.muteInstance(ch.instanceId, 3_600_000L); contextChannel = null }) {
-                        Text("1 Stunde stummschalten", color = FvColors.Muted)
+                    TextButton(onClick = { vm.muteInstance(ch.instanceId, 3_600_000L); contextChannel = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("1 Stunde stummschalten", color = FvColors.Text)
                     }
-                    TextButton(onClick = { vm.muteInstance(ch.instanceId, 8 * 3_600_000L); contextChannel = null }) {
-                        Text("8 Stunden stummschalten", color = FvColors.Muted)
+                    TextButton(onClick = { vm.muteInstance(ch.instanceId, 8 * 3_600_000L); contextChannel = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("8 Stunden stummschalten", color = FvColors.Text)
                     }
-                    TextButton(onClick = { vm.muteInstance(ch.instanceId, -1L); contextChannel = null }) {
+                    TextButton(onClick = { vm.muteInstance(ch.instanceId, -1L); contextChannel = null }, modifier = Modifier.fillMaxWidth()) {
                         Text("Dauerhaft stummschalten", color = FvColors.Del)
                     }
                 }
-                Spacer(Modifier.size(16.dp))
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
 }
 
 @Composable
-private fun SystemPulseHero(
+private fun ReachabilityPulseHeader(
+    connState: ConnectionState,
     openAlertsCount: Int,
     totalUnread: Int,
     channelsCount: Int,
-    onOpenAlerts: () -> Unit,
-    onFilterUnread: () -> Unit,
+    onOpenFocus: () -> Unit,
 ) {
-    val bgColor: Color
-    val borderColor: Color
-    val iconColor: Color
-    val title: String
+    val connDot = when (connState) {
+        ConnectionState.LIVE -> FvColors.Add
+        ConnectionState.SYNCED -> FvColors.Info
+        ConnectionState.CONNECTING -> FvColors.Mod
+        ConnectionState.OFFLINE -> FvColors.Dim
+    }
+    val connLabel = when (connState) {
+        ConnectionState.LIVE -> "FlowVault · Echtzeit-Schutz aktiv"
+        ConnectionState.SYNCED -> "FlowVault · Synchronisiert"
+        ConnectionState.CONNECTING -> "FlowVault · Verbinde…"
+        ConnectionState.OFFLINE -> "FlowVault · Offline (Auto-Reconnect)"
+    }
+
+    val cardBg: Color
+    val cardBorder: Color
+    val statusColor: Color
+    val headline: String
     val subtitle: String
 
     when {
         openAlertsCount > 0 -> {
-            bgColor = FvColors.Del.copy(alpha = 0.14f)
-            borderColor = FvColors.Del.copy(alpha = 0.45f)
-            iconColor = FvColors.Del
-            title = "Handlungsbedarf: $openAlertsCount kritische Störung${if (openAlertsCount == 1) "" else "en"}"
-            subtitle = "Mindestens ein Workflow verliert aktiv Ausführungen – Ursache prüfen oder zurückspielen."
+            cardBg = FvColors.Del.copy(alpha = 0.14f)
+            cardBorder = FvColors.Del.copy(alpha = 0.45f)
+            statusColor = FvColors.Del
+            headline = "$openAlertsCount kritische Störung${if (openAlertsCount == 1) "" else "en"}"
+            subtitle = "Mindestens ein Workflow verliert Ausführungen. Öffne unten „Fokus“ für Diagnose & Rollback."
         }
         totalUnread > 0 -> {
-            bgColor = FvColors.Accent.copy(alpha = 0.14f)
-            borderColor = FvColors.Accent.copy(alpha = 0.4f)
-            iconColor = FvColors.AccentHi
-            title = "$totalUnread ungelesene Meldung${if (totalUnread == 1) "" else "en"}"
-            subtitle = "Keine ungelösten kritischen Regressionen – neue Ereignisse warten auf Durchsicht."
+            cardBg = FvColors.Accent.copy(alpha = 0.14f)
+            cardBorder = FvColors.Accent.copy(alpha = 0.40f)
+            statusColor = FvColors.AccentHi
+            headline = "$totalUnread ungelesene Meldung${if (totalUnread == 1) "" else "en"}"
+            subtitle = "Keine kritische Regression offen – neue Ereignisse stehen bereit."
         }
         else -> {
-            bgColor = FvColors.Add.copy(alpha = 0.10f)
-            borderColor = FvColors.Add.copy(alpha = 0.30f)
-            iconColor = FvColors.Add
-            title = "Alle Systeme laufen ruhig"
-            subtitle = "$channelsCount überwachte Instanz${if (channelsCount == 1) "" else "en"} · keine offenen Störungen oder ungelesenen Alarme."
+            cardBg = FvColors.Add.copy(alpha = 0.10f)
+            cardBorder = FvColors.Add.copy(alpha = 0.28f)
+            statusColor = FvColors.Add
+            headline = "Alle Systeme laufen ruhig"
+            subtitle = "$channelsCount überwachte Instanz${if (channelsCount == 1) "" else "en"} · keine offenen Störungen."
         }
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .defaultMinSize(minHeight = 196.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.Bottom,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(
-                if (openAlertsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
-                contentDescription = null,
-                tint = iconColor,
-                modifier = Modifier.size(22.dp),
-            )
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(connDot))
+            Text(connLabel, style = MaterialTheme.typography.labelMedium, color = FvColors.Muted)
         }
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
-        if (openAlertsCount > 0) {
-            Button(
-                onClick = onOpenAlerts,
-                colors = ButtonDefaults.buttonColors(containerColor = FvColors.Del),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-            ) {
-                Text("Kritische Störungen jetzt klären")
+        Spacer(Modifier.height(10.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(cardBg)
+                .border(1.dp, cardBorder, RoundedCornerShape(18.dp))
+                .clickable { if (openAlertsCount > 0 || totalUnread > 0) onOpenFocus() }
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(
+                    if (openAlertsCount > 0) Icons.Default.Warning else Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = statusColor,
+                    modifier = Modifier.size(24.dp),
+                )
+                Text(headline, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = FvColors.Text)
             }
-        } else if (totalUnread > 0) {
-            OutlinedButton(
-                onClick = onFilterUnread,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-            ) {
-                Text("Ungelesene Meldungen filtern", color = FvColors.AccentHi)
-            }
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = FvColors.Muted)
         }
     }
 }
 
 @Composable
-private fun PermissionNudgeBanner(
+internal fun PermissionNudgeBanner(
     status: RealtimePermissionStatus,
     onFixBattery: () -> Unit,
     onFixNotifications: () -> Unit,
@@ -418,7 +393,7 @@ private fun PermissionNudgeBanner(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(FvColors.Mod.copy(alpha = 0.14f))
             .border(1.dp, FvColors.Mod.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
@@ -427,13 +402,13 @@ private fun PermissionNudgeBanner(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Default.BatteryAlert, contentDescription = null, tint = FvColors.Mod, modifier = Modifier.size(18.dp))
-            Text("Echtzeit-Zuverlässigkeit verbessern", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
+            Text("Echtzeit-Freigabe noch offen", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = FvColors.Text)
         }
         Text(
             if (!status.batteryUnrestricted) {
-                "Android drosselt Hintergrundverbindungen im Standby. Erlaube „Nicht eingeschränkt“, damit Alarme ohne Verzögerung ankommen."
+                "Erlaube Akku „Nicht eingeschränkt“, damit Android den Live-Stream im Standby nicht pausiert."
             } else {
-                "System-Benachrichtigungen sind noch deaktiviert – erlaube sie, damit Störungen hör- und sichtbar gemeldet werden."
+                "Erlaube System-Benachrichtigungen, damit kritische Ausfälle sofort gemeldet werden."
             },
             style = MaterialTheme.typography.bodySmall,
             color = FvColors.Muted,
@@ -443,17 +418,17 @@ private fun PermissionNudgeBanner(
                 Button(
                     onClick = onFixBattery,
                     colors = ButtonDefaults.buttonColors(containerColor = FvColors.AccentStrong),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 ) {
-                    Text("Akku-Freigabe erteilen", style = MaterialTheme.typography.labelMedium)
+                    Text("Akku freigeben", style = MaterialTheme.typography.labelMedium)
                 }
             }
             if (!status.notificationsGranted) {
                 OutlinedButton(
                     onClick = onFixNotifications,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 ) {
-                    Text("Benachrichtigungen erlauben", style = MaterialTheme.typography.labelMedium)
+                    Text("Meldungen erlauben", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -470,31 +445,33 @@ private fun SwipeableChannelRow(
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.StartToEnd) {
+            if (value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart) {
                 onToggleRead()
             }
-            false // Nicht löschen, sondern als Messenger-Schnellaktion zurückfedern
+            false // Beidseitiger Daumen-Swipe für Rechts- & Linkshänder, federt sauber zurück
         },
     )
 
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = true,
-        enableDismissFromEndToStart = false,
+        enableDismissFromEndToStart = true,
         backgroundContent = {
+            val alignEnd = dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
             Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(if (channel.unreadCount > 0) FvColors.Add.copy(alpha = 0.25f) else FvColors.Accent.copy(alpha = 0.25f))
                     .padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
             ) {
                 Icon(
                     if (channel.unreadCount > 0) Icons.Default.MarkChatRead else Icons.Default.MarkChatUnread,
                     contentDescription = null,
                     tint = if (channel.unreadCount > 0) FvColors.Add else FvColors.AccentHi,
                 )
+                Spacer(Modifier.width(8.dp))
                 Text(
                     if (channel.unreadCount > 0) "Als gelesen" else "Als ungelesen",
                     fontWeight = FontWeight.SemiBold,
@@ -526,13 +503,13 @@ private fun ChannelRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(50.dp)
                     .clip(CircleShape)
                     .background(avatarColor.copy(alpha = 0.22f)),
                 contentAlignment = Alignment.Center,
@@ -546,7 +523,7 @@ private fun ChannelRow(
             }
             Box(
                 modifier = Modifier
-                    .size(12.dp)
+                    .size(13.dp)
                     .clip(CircleShape)
                     .background(FvColors.Bg)
                     .padding(2.dp)
@@ -599,7 +576,7 @@ private fun ChannelRow(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(FvColors.Accent)
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
                         Text(
                             if (channel.unreadCount > 99) "99+" else "${channel.unreadCount}",
@@ -611,30 +588,6 @@ private fun ChannelRow(
                 }
             }
         }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun SearchResultRow(msg: MessageEntity, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(FvColors.Panel)
-            .combinedClickable(onClick = onClick)
-            .padding(12.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(msg.instanceName, style = MaterialTheme.typography.labelSmall, color = FvColors.AccentHi)
-            Text("·", color = FvColors.Dim)
-            Text(MessageCategoryHelper.badgeLabel(msg.kind), style = MaterialTheme.typography.labelSmall, color = FvColors.Muted)
-            if (msg.unread) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(FvColors.Accent))
-            }
-        }
-        Text(msg.title, fontWeight = FontWeight.Medium, color = FvColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(msg.body, style = MaterialTheme.typography.bodySmall, color = FvColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 

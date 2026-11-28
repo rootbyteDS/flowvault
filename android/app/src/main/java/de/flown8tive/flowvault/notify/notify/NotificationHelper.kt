@@ -31,6 +31,7 @@ class NotificationHelper(
 
         const val SERVICE_NOTIFICATION_ID = 9001
         const val EXTRA_OPEN_INSTANCE_ID = "open_instance_id"
+        const val EXTRA_OPEN_TAB = "open_tab"
     }
 
     fun ensureChannels() {

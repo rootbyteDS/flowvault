@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">FlowVault Notify</string>
+    <string name="widget_monitor_label">FlowVault Live-Monitor</string>
+    <string name="widget_monitor_desc">System-Puls (Ruhig / Ungelesen / Kritische Störung), letzte n8n-Ereignisse und Einhand-Schnellaktionen.</string>
+    <string name="widget_pulse_label">FlowVault System-Puls</string>
+    <string name="widget_pulse_desc">Kompakte 2×1-Statuskachel für die Daumen-Zone mit Live-Ampel und Sofort-Sync.</string>
 </resources>

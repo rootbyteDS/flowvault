@@ -10,6 +10,7 @@ import de.flown8tive.flowvault.notify.model.DeliveryMode
 import de.flown8tive.flowvault.notify.notify.NotificationHelper
 import de.flown8tive.flowvault.notify.service.RealtimeSyncService
 import de.flown8tive.flowvault.notify.service.SyncWorker
+import de.flown8tive.flowvault.notify.widget.FlowVaultWidgetUpdater
 
 class FlowVaultApp : Application() {
     lateinit var prefs: SecurePrefs
@@ -41,5 +42,6 @@ class FlowVaultApp : Application() {
                 RealtimeSyncService.start(this)
             }
         }
+        FlowVaultWidgetUpdater.updateAllAsync(this)
     }
 }

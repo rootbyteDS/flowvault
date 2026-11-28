@@ -126,8 +126,11 @@ fun ChannelDto.toEntity(): ChannelEntity = ChannelEntity(
 
 @Dao
 interface NotifyDao {
-    @Query("SELECT * FROM channels ORDER BY CASE WHEN unreadCount > 0 THEN 0 ELSE 1 END, COALESCE(lastMessageAt, 0) DESC, name ASC")
+    @Query("SELECT * FROM channels ORDER BY CASE WHEN openAlerts > 0 THEN 0 WHEN unreadCount > 0 THEN 1 ELSE 2 END, COALESCE(lastMessageAt, 0) DESC, name ASC")
     fun observeChannels(): Flow<List<ChannelEntity>>
+
+    @Query("SELECT * FROM channels ORDER BY CASE WHEN openAlerts > 0 THEN 0 WHEN unreadCount > 0 THEN 1 ELSE 2 END, COALESCE(lastMessageAt, 0) DESC, name ASC")
+    suspend fun getAllChannelsSnapshot(): List<ChannelEntity>
 
     @Query("SELECT * FROM channels WHERE instanceId = :instanceId LIMIT 1")
     suspend fun getChannel(instanceId: Int): ChannelEntity?
@@ -159,6 +162,12 @@ interface NotifyDao {
     @Query("UPDATE channels SET unreadCount = :count WHERE instanceId = :instanceId")
     suspend fun setChannelUnreadCount(instanceId: Int, count: Int)
 
+    @Query("UPDATE channels SET unreadCount = 0")
+    suspend fun clearAllChannelUnreadCounts()
+
+    @Query("UPDATE messages SET unread = 0 WHERE unread = 1")
+    suspend fun markAllMessagesRead()
+
     @Query("UPDATE channels SET mutedUntil = :mutedUntil WHERE instanceId = :instanceId")
     suspend fun updateChannelMute(instanceId: Int, mutedUntil: Long?)
 
@@ -168,8 +177,17 @@ interface NotifyDao {
     @Query("SELECT * FROM messages WHERE kind IN ('alert_opened', 'alert_escalated') AND resolvedBySeq IS NULL ORDER BY updatedAt DESC")
     fun observeOpenAlertMessages(): Flow<List<MessageEntity>>
 
+    @Query("SELECT * FROM messages WHERE kind IN ('alert_opened', 'alert_escalated') AND resolvedBySeq IS NULL ORDER BY updatedAt DESC LIMIT 5")
+    suspend fun getOpenAlertsSnapshot(): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE unread = 1 ORDER BY seq DESC")
     fun observeAllUnreadMessages(): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE unread = 1 ORDER BY seq DESC LIMIT 5")
+    suspend fun getUnreadMessagesSnapshot(): List<MessageEntity>
+
+    @Query("SELECT * FROM messages ORDER BY seq DESC LIMIT 5")
+    suspend fun getRecentMessagesSnapshot(): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE title LIKE :q OR body LIKE :q OR workflowName LIKE :q ORDER BY seq DESC LIMIT 100")
     fun searchMessages(q: String): Flow<List<MessageEntity>>

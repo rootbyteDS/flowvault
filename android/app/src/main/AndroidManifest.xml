@@ -77,5 +77,33 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".widget.WidgetActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".widget.FlowVaultMonitorWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_monitor_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/flowvault_widget_monitor_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.FlowVaultPulseWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_pulse_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/flowvault_widget_pulse_info" />
+        </receiver>
     </application>
 </manifest>

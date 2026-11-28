@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.Intent
 import de.flown8tive.flowvault.notify.FlowVaultApp
 import de.flown8tive.flowvault.notify.model.DeliveryMode
+import de.flown8tive.flowvault.notify.widget.FlowVaultWidgetUpdater
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val app = context.applicationContext as? FlowVaultApp ?: return
+        FlowVaultWidgetUpdater.updateAllAsync(context)
         if (!app.prefs.isPaired) return
         SyncWorker.schedulePeriodic(context)
         if (app.prefs.deliveryMode == DeliveryMode.REALTIME_SERVICE) {

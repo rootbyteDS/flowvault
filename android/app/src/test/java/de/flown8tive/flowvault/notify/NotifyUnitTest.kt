@@ -1,6 +1,9 @@
 package de.flown8tive.flowvault.notify
 
 import de.flown8tive.flowvault.notify.crypto.E2eCrypto
+import de.flown8tive.flowvault.notify.data.ChannelEntity
+import de.flown8tive.flowvault.notify.data.ConnectionState
+import de.flown8tive.flowvault.notify.data.toEntity
 import de.flown8tive.flowvault.notify.model.DeliveryMode
 import de.flown8tive.flowvault.notify.model.DiagnosisDto
 import de.flown8tive.flowvault.notify.model.EncryptedEnvelopeDto
@@ -14,6 +17,8 @@ import de.flown8tive.flowvault.notify.model.PairingUriParser
 import de.flown8tive.flowvault.notify.model.RollbackHintDto
 import de.flown8tive.flowvault.notify.model.VersionRefDto
 import de.flown8tive.flowvault.notify.model.WorkflowRefDto
+import de.flown8tive.flowvault.notify.widget.FlowVaultWidgetSnapshot
+import de.flown8tive.flowvault.notify.widget.WidgetTone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -160,5 +165,76 @@ class NotifyUnitTest {
         assertTrue(framed.whyImpact.contains("Invoice Sync"))
         assertTrue(framed.howRecommendation!!.contains("v13"))
         assertEquals(true, alertMsg.unread)
+    }
+
+    @Test
+    fun widgetSnapshotPrioritizesCriticalAlertsUnreadAndCalmStates() {
+        val unpaired = FlowVaultWidgetSnapshot.build(
+            isPaired = false,
+            connectionState = ConnectionState.OFFLINE,
+            channels = emptyList(),
+            openAlerts = emptyList(),
+            unreadMessages = emptyList(),
+            recentMessages = emptyList(),
+        )
+        assertEquals(WidgetTone.UNPAIRED, unpaired.tone)
+        assertFalse(unpaired.showMarkAllRead)
+
+        val calmChannel = ChannelEntity(
+            instanceId = 1,
+            name = "Produktion",
+            color = "#4CC38A",
+            enabled = true,
+            lastSyncOk = true,
+            openAlerts = 0,
+            unreadCount = 0,
+            readSeq = 10,
+            mutedUntil = null,
+            lastMessageTitle = "Sync erfolgreich",
+            lastMessageBody = "OK",
+            lastMessageKind = "workflow_changed",
+            lastMessageAt = 1_764_097_200_000L,
+        )
+        val calm = FlowVaultWidgetSnapshot.build(
+            isPaired = true,
+            connectionState = ConnectionState.LIVE,
+            channels = listOf(calmChannel),
+            openAlerts = emptyList(),
+            unreadMessages = emptyList(),
+            recentMessages = emptyList(),
+            nowMs = 1_764_097_230_000L,
+        )
+        assertEquals(WidgetTone.CALM, calm.tone)
+        assertEquals("LIVE", calm.connectionBadge)
+        assertEquals("channels", calm.openTabTarget)
+        assertEquals(1, calm.rows.size)
+
+        val alertEntity = MessageDto(
+            seq = 77,
+            instance = InstanceRefDto(1, "Produktion"),
+            workflow = WorkflowRefDto(5, "Stripe Sync"),
+            kind = "alert_opened",
+            severity = "critical",
+            title = "Ausfall",
+            body = "500 Error",
+            unread = true,
+            metadata = MessageMetadataDto(rate = 0.8),
+            createdAt = 1_764_097_200_000L,
+            updatedAt = 1_764_097_210_000L,
+        ).toEntity(defaultUnread = true)
+
+        val critical = FlowVaultWidgetSnapshot.build(
+            isPaired = true,
+            connectionState = ConnectionState.LIVE,
+            channels = listOf(calmChannel.copy(openAlerts = 1, unreadCount = 2)),
+            openAlerts = listOf(alertEntity),
+            unreadMessages = listOf(alertEntity),
+            recentMessages = emptyList(),
+            nowMs = 1_764_097_230_000L,
+        )
+        assertEquals(WidgetTone.CRITICAL, critical.tone)
+        assertEquals("focus", critical.openTabTarget)
+        assertTrue(critical.showMarkAllRead)
+        assertEquals(WidgetTone.CRITICAL, critical.rows.first().tone)
     }
 }

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/pulse_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="12dp"
+    android:paddingTop="9dp"
+    android:paddingEnd="10dp"
+    android:paddingBottom="9dp">
+
+    <ImageView
+        android:id="@+id/pulse_dot"
+        android:layout_width="11dp"
+        android:layout_height="11dp"
+        android:contentDescription="@null"
+        android:src="@drawable/widget_dot_green" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/pulse_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="FlowVault · Ruhig"
+            android:textColor="#EFE9DF"
+            android:textSize="12.5sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/pulse_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="Live geschützt"
+            android:textColor="#A3A8B2"
+            android:textSize="10.5sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/pulse_btn_sync"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/widget_btn_bg"
+        android:gravity="center"
+        android:paddingStart="9dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="9dp"
+        android:paddingBottom="6dp"
+        android:text="↻"
+        android:textColor="#E39A70"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+</LinearLayout>

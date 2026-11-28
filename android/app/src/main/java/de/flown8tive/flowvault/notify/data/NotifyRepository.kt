@@ -13,6 +13,7 @@ import de.flown8tive.flowvault.notify.model.RollbackExecuteResponseDto
 import de.flown8tive.flowvault.notify.model.RuleDto
 import de.flown8tive.flowvault.notify.notify.NotificationHelper
 import de.flown8tive.flowvault.notify.service.RealtimeSyncService
+import de.flown8tive.flowvault.notify.widget.FlowVaultWidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,7 +59,9 @@ class NotifyRepository(
     fun searchMessages(query: String): Flow<List<MessageEntity>> = dao.searchMessages("%$query%")
 
     fun setConnectionState(state: ConnectionState) {
+        val changed = _connectionState.value != state
         _connectionState.value = state
+        if (changed) FlowVaultWidgetUpdater.updateAllAsync(context)
     }
 
     fun recordHeartbeat() {
@@ -164,6 +167,7 @@ class NotifyRepository(
         if (_connectionState.value != ConnectionState.LIVE) {
             _connectionState.value = ConnectionState.SYNCED
         }
+        FlowVaultWidgetUpdater.updateAllAsync(context)
         return newlyCreated
     }
 
@@ -182,6 +186,11 @@ class NotifyRepository(
 
         val existing = dao.getChannel(msg.instance.id)
         val unreadInc = if (isNew && shouldMarkUnread) 1 else 0
+        val alertDelta = when {
+            isNew && (msg.kind == "alert_opened" || msg.kind == "alert_escalated") -> 1
+            isNew && msg.kind == "alert_resolved" -> -1
+            else -> 0
+        }
         val updatedChannel = (existing ?: ChannelEntity(
             instanceId = msg.instance.id,
             name = msg.instance.name,
@@ -199,6 +208,7 @@ class NotifyRepository(
         )).copy(
             name = msg.instance.name,
             color = msg.instance.color,
+            openAlerts = ((existing?.openAlerts ?: 0) + alertDelta).coerceAtLeast(0),
             unreadCount = (existing?.unreadCount ?: 0) + unreadInc,
             lastMessageTitle = msg.title,
             lastMessageBody = msg.body,
@@ -206,6 +216,7 @@ class NotifyRepository(
             lastMessageAt = msg.updatedAt,
         )
         dao.upsertChannels(listOf(updatedChannel))
+        FlowVaultWidgetUpdater.updateAllAsync(context)
 
         // System-Benachrichtigung bei neuen Meldungen außerhalb des aktuell geöffneten Chats – und immer bei Selbsttests!
         if ((isNew && currentOpen != msg.instance.id && !isMuted(existing?.mutedUntil)) || msg.kind == "test") {
@@ -271,9 +282,27 @@ class NotifyRepository(
         dao.markMessagesReadUpTo(instanceId, seq)
         dao.markChannelReadRow(instanceId, seq)
         notifications.cancelInstanceNotifications(instanceId)
+        FlowVaultWidgetUpdater.updateAllAsync(context)
         val url = prefs.serverUrl ?: return
         val token = prefs.deviceToken ?: return
         runCatching { api.markRead(url, token, instanceId, seq) }
+    }
+
+    /** Alle Kanäle und Meldungen auf einmal als gelesen markieren (z. B. aus Fokus oder Widget). */
+    suspend fun markAllRead() {
+        val channels = dao.getAllChannelsSnapshot()
+        dao.markAllMessagesRead()
+        dao.clearAllChannelUnreadCounts()
+        for (ch in channels) {
+            notifications.cancelInstanceNotifications(ch.instanceId)
+        }
+        FlowVaultWidgetUpdater.updateAllAsync(context)
+        val url = prefs.serverUrl ?: return
+        val token = prefs.deviceToken ?: return
+        for (ch in channels.filter { it.unreadCount > 0 }) {
+            val seq = maxOf(prefs.latestSeq, dao.latestSeqInChannel(ch.instanceId) ?: 0L)
+            runCatching { api.markRead(url, token, ch.instanceId, seq) }
+        }
     }
 
     /** Ganzen Kanal gezielt wieder als ungelesen markieren (z. B. zur späteren Bearbeitung). */
@@ -286,6 +315,7 @@ class NotifyRepository(
         } else {
             dao.setChannelUnreadCount(instanceId, 1)
         }
+        FlowVaultWidgetUpdater.updateAllAsync(context)
         val url = prefs.serverUrl ?: return
         val token = prefs.deviceToken ?: return
         runCatching { api.markChannelUnread(url, token, instanceId) }
@@ -297,6 +327,7 @@ class NotifyRepository(
         val count = dao.countUnreadInChannel(instanceId)
         dao.setChannelUnreadCount(instanceId, count)
         if (!unread && count == 0) notifications.cancelInstanceNotifications(instanceId)
+        FlowVaultWidgetUpdater.updateAllAsync(context)
         val url = prefs.serverUrl ?: return
         val token = prefs.deviceToken ?: return
         runCatching { api.setMessageUnread(url, token, seq, unread) }
@@ -373,6 +404,7 @@ class NotifyRepository(
         prefs.clearAll()
         _allowRollback.value = false
         _connectionState.value = ConnectionState.OFFLINE
+        FlowVaultWidgetUpdater.updateAllAsync(context)
     }
 
     private fun isMuted(mutedUntil: Long?): Boolean {
